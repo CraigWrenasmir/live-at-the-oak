@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Wrenasmir — Live at The Oak</title>
+<style>
+  :root { --green:#3ec54b; --red:#e04a3a; --yellow:#e8c53a; --blue:#3a7de0; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:#0a0708; overflow:hidden; touch-action:none;
+    font-family:"Courier New", ui-monospace, monospace; color:#e8ddc9; }
+  #stage { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  canvas { image-rendering:pixelated; image-rendering:crisp-edges; width:100%; height:100%; object-fit:contain; }
+  /* scanlines + vignette over everything */
+  #crt { position:fixed; inset:0; pointer-events:none; z-index:50;
+    background:
+      repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%); }
+  .screen { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; padding:24px; text-align:center;
+    background:radial-gradient(ellipse at 50% 30%, #241417 0%, #0a0708 70%); }
+  .hidden { display:none !important; }
+  h1 { font-size:clamp(20px,4.5vw,40px); letter-spacing:2px; text-transform:uppercase;
+    color:#7ee787; text-shadow: 2px 0 rgba(224,74,58,.8), -2px 0 rgba(58,125,224,.8), 0 0 18px rgba(126,231,135,.35);
+    animation:glitch 3.1s infinite steps(1); }
+  @keyframes glitch { 0%,93%,100% { transform:none; } 94% { transform:translateX(2px) skewX(2deg); }
+    95% { transform:translateX(-2px); } 96% { transform:none; } }
+  .sub { color:#b8a98f; font-size:clamp(11px,2vw,15px); letter-spacing:1px; }
+  .card { background:rgba(20,12,14,.85); border:2px solid #4a2c2f; padding:18px 22px; max-width:420px; width:100%; }
+  button { font-family:inherit; font-size:15px; letter-spacing:1px; cursor:pointer;
+    background:#2a181b; color:#e8ddc9; border:2px solid #6a4046; padding:12px 18px; width:100%;
+    text-transform:uppercase; }
+  button:hover, button:focus-visible { background:#3a2226; border-color:#e8c53a; color:#fff; outline:none; }
+  button.primary { border-color:#7ee787; color:#7ee787; }
+  button.primary:hover { background:#1d2e20; }
+  .row { display:flex; gap:10px; width:100%; }
+  .row button { flex:1; }
+  .diffsel button.active { border-color:#e8c53a; color:#e8c53a; background:#332a12; }
+  #hint { font-size:12px; color:#8a7a63; line-height:1.7; }
+  #calStatus { font-size:26px; color:#e8c53a; min-height:34px; }
+  .big { font-size:clamp(26px,6vw,48px); color:#e8c53a; }
+  .judgeCounts { display:grid; grid-template-columns:auto auto; gap:4px 22px; font-size:15px; text-align:left; }
+  .judgeCounts b { text-align:right; }
+  kbd { border:1px solid #6a4046; padding:1px 7px; margin:0 2px; background:#1a0f11; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="crt"></div>
+
+<!-- TITLE / SONG SELECT -->
+<div id="scrTitle" class="screen">
+  <h1>Wrenasmir<br>Live at The Oak</h1>
+  <div class="sub">A RETRO RHYTHM SET &mdash; RECORDED LIVE</div>
+  <div class="card" style="display:flex;flex-direction:column;gap:12px;">
+    <div class="sub" id="songLabel">01 &mdash; CRAFLUROPI &mdash; 120 BPM</div>
+    <div class="row diffsel">
+      <button id="btnStd" class="active">Standard</button>
+      <button id="btnHard">Hard</button>
+    </div>
+    <button id="btnPlay" class="primary">&#9654; Take the stage</button>
+    <button id="btnCal">Calibrate timing</button>
+    <div id="hint">Keys <kbd>D</kbd><kbd>F</kbd><kbd>J</kbd><kbd>K</kbd> or tap the four lanes.<br>
+      Hit the gems as they cross the line.</div>
+  </div>
+</div>
+
+<!-- CALIBRATION -->
+<div id="scrCal" class="screen hidden">
+  <h1>Calibrate</h1>
+  <div class="card" style="display:flex;flex-direction:column;gap:14px;">
+    <div class="sub">Tap any lane key (or the screen)<br>in time with the click. 8 taps.</div>
+    <div id="calStatus">&mdash;</div>
+    <button id="btnCalDone">Cancel</button>
+  </div>
+</div>
+
+<!-- RESULTS -->
+<div id="scrResults" class="screen hidden">
+  <h1 id="resRank">Rank A</h1>
+  <div class="card" style="display:flex;flex-direction:column;gap:14px;align-items:center;">
+    <div class="big" id="resScore">0</div>
+    <div class="judgeCounts" id="resCounts"></div>
+    <div class="sub" id="resAcc"></div>
+    <div class="row">
+      <button id="btnRetry" class="primary">Encore</button>
+      <button id="btnBack">Set list</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ================= Live at The Oak — core timing engine =================
+   All gameplay time derives from AudioContext.currentTime. The visual
+   frame is a pure function of song position; a dropped frame can never
+   desync judgement.                                                     */
+
+const SONGS = [{
+  label: "01 — CRAFLUROPI — 120 BPM",
+  charts: { standard: "charts/crafluropi.json", hard: "charts/crafluropi-hard.json" }
+}];
+
+const LANE_COLORS = ["#3ec54b", "#e04a3a", "#e8c53a", "#3a7de0"];
+const LANE_KEYS = ["KeyD", "KeyF", "KeyJ", "KeyK"];
+const KEY_LABELS = ["D", "F", "J", "K"];
+const WINDOWS = { perfect: 0.045, great: 0.090, ok: 0.130 };  // seconds
+const POINTS = { perfect: 100, great: 60, ok: 30 };
+const LOOKAHEAD = 1.6;      // seconds of highway visible
+const LEAD_IN = 2.2;        // silence before the song starts
+
+const W = 640, H = 360;     // internal PSX-ish resolution, upscaled
+const cv = document.getElementById("cv");
+cv.width = W; cv.height = H;
+const g = cv.getContext("2d");
+
+let ac = null;              // AudioContext, created on first gesture
+let songBuffer = null, chart = null, source = null;
+let startAt = 0;            // ac.currentTime when songTime === -LEAD_IN hits 0
+let playing = false, difficulty = "standard";
+let latency = parseFloat(localStorage.getItem("oakLatency") || "0");
+
+let notes = [];             // live copies: {t, lane, state}
+let laneFlash = [0,0,0,0];  // receptor flash timestamps (songTime)
+let judgements = [];        // floating popups {text, color, t, lane}
+let score = 0, combo = 0, maxCombo = 0;
+let counts = { perfect:0, great:0, ok:0, miss:0 };
+
+const $ = id => document.getElementById(id);
+const screens = { title:$("scrTitle"), cal:$("scrCal"), results:$("scrResults") };
+function show(name) { for (const k in screens) screens[k].classList.toggle("hidden", k !== name); }
+function hideAll() { for (const k in screens) screens[k].classList.add("hidden"); }
+
+function audioCtx() {
+  if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+  if (ac.state === "suspended") ac.resume();
+  return ac;
+}
+
+async function loadSong(song, diff) {
+  const ctx = audioCtx();
+  const [chartRes, audioRes] = await Promise.all([
+    fetch(song.charts[diff]), fetch("audio/Crafluropi.mp3")]);
+  chart = await chartRes.json();
+  const raw = await audioRes.arrayBuffer();
+  songBuffer = await ctx.decodeAudioData(raw);
+}
+
+function songTime() { return ac.currentTime - startAt; }
+
+function startPlay() {
+  const ctx = audioCtx();
+  notes = chart.notes.map(n => ({ t:n.t, lane:n.lane, state:"pending" }));
+  score = 0; combo = 0; maxCombo = 0;
+  counts = { perfect:0, great:0, ok:0, miss:0 };
+  judgements = [];
+  source = ctx.createBufferSource();
+  source.buffer = songBuffer;
+  source.connect(ctx.destination);
+  const t0 = ctx.currentTime + 0.1;
+  source.start(t0 + LEAD_IN);
+  startAt = t0 + LEAD_IN;
+  playing = true;
+  hideAll();
+  requestAnimationFrame(frame);
+}
+
+function endPlay() {
+  playing = false;
+  try { source && source.stop(); } catch(e) {}
+  const total = counts.perfect + counts.great + counts.ok + counts.miss;
+  const acc = total ? (counts.perfect + counts.great*0.6 + counts.ok*0.3) / total : 0;
+  const rank = acc > .95 ? "S" : acc > .88 ? "A" : acc > .75 ? "B" : acc > .6 ? "C" : "D";
+  $("resRank").textContent = "Rank " + rank;
+  $("resScore").textContent = score.toLocaleString();
+  $("resCounts").innerHTML =
+    `<span>Perfect</span><b>${counts.perfect}</b>` +
+    `<span>Great</span><b>${counts.great}</b>` +
+    `<span>OK</span><b>${counts.ok}</b>` +
+    `<span>Miss</span><b>${counts.miss}</b>`;
+  $("resAcc").textContent = `Accuracy ${(acc*100).toFixed(1)}% — Max combo ${maxCombo}`;
+  show("results");
+}
+
+/* ---------------- judgement ---------------- */
+function pressLane(lane) {
+  if (!playing) return;
+  const now = songTime() - latency;
+  laneFlash[lane] = songTime();
+  let best = null, bestDist = Infinity;
+  for (const n of notes) {
+    if (n.state !== "pending" || n.lane !== lane) continue;
+    const d = Math.abs(n.t - now);
+    if (d < bestDist) { bestDist = d; best = n; }
+    if (n.t - now > WINDOWS.ok) break;   // notes sorted; nothing closer ahead
+  }
+  if (!best || bestDist > WINDOWS.ok) return;   // empty strum: no penalty
+  let grade = bestDist <= WINDOWS.perfect ? "perfect" : bestDist <= WINDOWS.great ? "great" : "ok";
+  best.state = "hit";
+  counts[grade]++;
+  combo++; maxCombo = Math.max(maxCombo, combo);
+  const mult = 1 + Math.min(3, Math.floor(combo / 10));
+  score += POINTS[grade] * mult;
+  judgements.push({ text: grade.toUpperCase(), grade, t: songTime(), lane });
+}
+
+function sweepMisses(now) {
+  for (const n of notes) {
+    if (n.state === "pending" && n.t < now - WINDOWS.ok) {
+      n.state = "missed";
+      counts.miss++;
+      if (combo > 0) judgements.push({ text:"MISS", grade:"miss", t: songTime(), lane:n.lane });
+      combo = 0;
+    }
+  }
+}
+
+/* ---------------- rendering ---------------- */
+// highway geometry: v=0 at hit line, v=1 at horizon
+const HIT_Y = H - 46, HOR_Y = 78, W_NEAR = 400, W_FAR = 90, CX = W/2;
+function proj(v) { const a = 0.6; return (v * (1 + a)) / (v + a); }   // perspective ease
+function laneX(lane, v) {
+  const p = proj(Math.max(v, 0));
+  const w = W_NEAR + (W_FAR - W_NEAR) * p;
+  return CX + ((lane + 0.5) / 4 - 0.5) * w;
+}
+function edgeX(u, v) {  // u in [0,1] across highway
+  const p = proj(Math.max(v, 0));
+  const w = W_NEAR + (W_FAR - W_NEAR) * p;
+  return CX + (u - 0.5) * w;
+}
+function vy(v) { return HIT_Y + (HOR_Y - HIT_Y) * proj(Math.max(v, 0)); }
+
+function frame() {
+  if (!playing) return;
+  const now = songTime() - latency;
+  sweepMisses(now);
+
+  // background: dark pub, warm stage glow
+  g.fillStyle = "#0a0708"; g.fillRect(0, 0, W, H);
+  const glow = g.createRadialGradient(CX, HOR_Y, 10, CX, HOR_Y, 300);
+  glow.addColorStop(0, "rgba(232,197,58,0.18)");
+  glow.addColorStop(0.5, "rgba(224,74,58,0.07)");
+  glow.addColorStop(1, "transparent");
+  g.fillStyle = glow; g.fillRect(0, 0, W, H);
+
+  // banner text at horizon (the venue screen)
+  g.font = "10px 'Courier New', monospace"; g.textAlign = "center";
+  g.fillStyle = "rgba(224,74,58,.8)"; g.fillText("WRENASMIR — LIVE AT THE OAK", CX+1, HOR_Y-26);
+  g.fillStyle = "rgba(62,197,75,.8)";  g.fillText("WRENASMIR — LIVE AT THE OAK", CX-1, HOR_Y-27);
+
+  // highway body
+  g.fillStyle = "#191014";
+  g.beginPath();
+  g.moveTo(edgeX(0,0), vy(0)); g.lineTo(edgeX(1,0), vy(0));
+  g.lineTo(edgeX(1,1), vy(1)); g.lineTo(edgeX(0,1), vy(1));
+  g.closePath(); g.fill();
+
+  // beat lines scrolling down the highway
+  const beatLen = 60 / chart.bpm;
+  const firstBeat = Math.ceil((now - 0.05) / beatLen) * beatLen;
+  g.strokeStyle = "rgba(232,221,201,0.10)"; g.lineWidth = 1;
+  for (let bt = firstBeat; bt < now + LOOKAHEAD; bt += beatLen) {
+    const v = (bt - now) / LOOKAHEAD; if (v < 0 || v > 1) continue;
+    g.beginPath(); g.moveTo(edgeX(0,v), vy(v)); g.lineTo(edgeX(1,v), vy(v)); g.stroke();
+  }
+  // lane dividers
+  g.strokeStyle = "rgba(232,221,201,0.16)";
+  for (let i = 0; i <= 4; i++) {
+    g.beginPath(); g.moveTo(edgeX(i/4,0), vy(0)); g.lineTo(edgeX(i/4,1), vy(1)); g.stroke();
+  }
+
+  // receptors at the hit line
+  for (let l = 0; l < 4; l++) {
+    const x = laneX(l, 0), y = vy(0);
+    const since = songTime() - laneFlash[l];
+    const lit = since < 0.12;
+    g.lineWidth = 2.5;
+    g.strokeStyle = LANE_COLORS[l];
+    g.globalAlpha = lit ? 1 : 0.65;
+    g.beginPath(); g.ellipse(x, y, 20, 9, 0, 0, Math.PI*2); g.stroke();
+    if (lit) { g.globalAlpha = 0.35; g.fillStyle = LANE_COLORS[l];
+      g.beginPath(); g.ellipse(x, y, 20, 9, 0, 0, Math.PI*2); g.fill(); }
+    g.globalAlpha = 1;
+    g.fillStyle = "rgba(232,221,201,.5)"; g.font = "9px monospace";
+    g.fillText(KEY_LABELS[l], x, y + 26);
+  }
+
+  // notes (draw far-to-near so near gems overlap)
+  const visible = [];
+  for (const n of notes) {
+    if (n.state !== "pending") continue;
+    const v = (n.t - now) / LOOKAHEAD;
+    if (v > 1.05) break;
+    if (v >= -0.03) visible.push([n, v]);
+  }
+  for (let i = visible.length - 1; i >= 0; i--) {
+    const [n, v] = visible[i];
+    const x = laneX(n.lane, v), y = vy(v);
+    const p = 1 - proj(Math.max(v,0));
+    const rx = 8 + 12*p, ry = 4 + 6*p;
+    g.fillStyle = LANE_COLORS[n.lane];
+    g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.fill();
+    g.fillStyle = "rgba(255,255,255,.85)";
+    g.beginPath(); g.ellipse(x, y - ry*0.35, rx*0.45, ry*0.4, 0, 0, Math.PI*2); g.fill();
+    g.strokeStyle = "rgba(0,0,0,.5)"; g.lineWidth = 1.5;
+    g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.stroke();
+  }
+
+  // judgement popups
+  const jcolors = { perfect:"#7ee787", great:"#e8c53a", ok:"#b8a98f", miss:"#e04a3a" };
+  judgements = judgements.filter(j => songTime() - j.t < 0.6);
+  for (const j of judgements) {
+    const age = (songTime() - j.t) / 0.6;
+    g.globalAlpha = 1 - age;
+    g.fillStyle = jcolors[j.grade];
+    g.font = "bold 13px monospace";
+    g.fillText(j.text, laneX(j.lane, 0), vy(0) - 34 - age*22);
+    g.globalAlpha = 1;
+  }
+
+  // HUD
+  g.textAlign = "left"; g.font = "bold 16px monospace";
+  g.fillStyle = "#e8ddc9"; g.fillText(score.toLocaleString(), 12, 24);
+  const mult = 1 + Math.min(3, Math.floor(combo / 10));
+  g.font = "11px monospace"; g.fillStyle = "#8a7a63";
+  g.fillText("x" + mult + (combo >= 10 ? "  combo " + combo : ""), 12, 40);
+  if (combo >= 10) {
+    g.textAlign = "center"; g.font = "bold 20px monospace";
+    g.fillStyle = "#e8c53a"; g.globalAlpha = 0.9;
+    g.fillText(combo + "", CX, 40); g.globalAlpha = 1;
+  }
+  // count-in
+  if (now < 0) {
+    g.textAlign = "center"; g.font = "bold 34px monospace"; g.fillStyle = "#7ee787";
+    g.fillText(Math.ceil(-now / (60/chart.bpm)) + "", CX, H/2 - 40);
+  }
+  g.textAlign = "center";
+
+  if (now > chart.duration + 1.2) { endPlay(); return; }
+  requestAnimationFrame(frame);
+}
+
+/* ---------------- calibration ---------------- */
+let calActive = false, calClicks = [], calTaps = [];
+function startCal() {
+  const ctx = audioCtx();
+  calActive = true; calClicks = []; calTaps = [];
+  show("cal");
+  $("calStatus").textContent = "listen…";
+  const interval = 0.5, start = ctx.currentTime + 0.6;
+  for (let i = 0; i < 24; i++) {
+    const t = start + i * interval;
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.frequency.value = i % 4 === 0 ? 1200 : 800;
+    gain.gain.setValueAtTime(0.4, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(t); osc.stop(t + 0.08);
+    calClicks.push(t);
+  }
+  setTimeout(() => { if (calActive) finishCal(false); }, (24 * interval + 1.5) * 1000);
+}
+function calTap() {
+  if (!calActive) return;
+  const now = ac.currentTime;
+  let nearest = calClicks.reduce((a,b) => Math.abs(b-now) < Math.abs(a-now) ? b : a);
+  calTaps.push(now - nearest);
+  $("calStatus").textContent = calTaps.length + " / 8";
+  if (calTaps.length >= 8) finishCal(true);
+}
+function finishCal(ok) {
+  calActive = false;
+  if (ok) {
+    const s = [...calTaps].sort((a,b) => a-b);
+    latency = s[Math.floor(s.length/2)];
+    localStorage.setItem("oakLatency", latency.toFixed(4));
+    $("calStatus").textContent = "offset " + Math.round(latency*1000) + " ms — saved";
+    setTimeout(() => show("title"), 1200);
+  } else show("title");
+}
+
+/* ---------------- input ---------------- */
+document.addEventListener("keydown", e => {
+  if (e.repeat) return;
+  const lane = LANE_KEYS.indexOf(e.code);
+  if (calActive) { calTap(); return; }
+  if (lane >= 0) { e.preventDefault(); pressLane(lane); }
+  if (e.code === "Escape" && playing) { endPlay(); }
+});
+cv.addEventListener("pointerdown", e => {
+  if (calActive) { calTap(); return; }
+  if (!playing) return;
+  const r = cv.getBoundingClientRect();
+  // object-fit:contain — map back to internal canvas space
+  const scale = Math.min(r.width / W, r.height / H);
+  const ox = (r.width - W*scale) / 2;
+  const x = (e.clientX - r.left - ox) / scale;
+  pressLane(Math.max(0, Math.min(3, Math.floor((x - (CX - W_NEAR/2)) / (W_NEAR/4)))));
+});
+document.getElementById("scrCal").addEventListener("pointerdown", () => calTap());
+
+/* ---------------- menu wiring ---------------- */
+$("btnStd").onclick = () => { difficulty = "standard"; $("btnStd").classList.add("active"); $("btnHard").classList.remove("active"); };
+$("btnHard").onclick = () => { difficulty = "hard"; $("btnHard").classList.add("active"); $("btnStd").classList.remove("active"); };
+$("btnPlay").onclick = async () => {
+  $("btnPlay").textContent = "Loading…";
+  try {
+    await loadSong(SONGS[0], difficulty);
+    startPlay();
+  } catch (err) {
+    $("btnPlay").textContent = "Load failed — serve over http";
+    console.error(err);
+    return;
+  }
+  $("btnPlay").innerHTML = "&#9654; Take the stage";
+};
+$("btnCal").onclick = () => startCal();
+$("btnCalDone").onclick = () => finishCal(false);
+$("btnRetry").onclick = () => startPlay();
+$("btnBack").onclick = () => show("title");
+</script>
+</body>
+</html>
