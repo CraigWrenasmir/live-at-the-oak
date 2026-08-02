@@ -52,6 +52,8 @@
   .judgeCounts { display:grid; grid-template-columns:auto auto; gap:4px 22px; font-size:15px; text-align:left; }
   .judgeCounts b { text-align:right; }
   kbd { border:1px solid #6a4046; padding:1px 7px; margin:0 2px; background:#1a0f11; }
+  #btnPause { position:fixed; top:10px; right:10px; z-index:30; width:auto;
+    padding:8px 13px; font-size:14px; background:rgba(26,15,17,.7); }
 </style>
 </head>
 <body>
@@ -60,6 +62,7 @@
   <canvas id="cv"></canvas>
 </div>
 <div id="crt"></div>
+<button id="btnPause" class="hidden" aria-label="Pause">&#10074;&#10074;</button>
 
 <!-- TITLE / SONG SELECT -->
 <div id="scrTitle" class="screen">
@@ -76,6 +79,16 @@
     <button id="btnCal">Calibrate timing</button>
     <div id="hint">Keys <kbd>D</kbd><kbd>F</kbd><kbd>J</kbd><kbd>K</kbd> or tap the four lanes.<br>
       Hit the gems as they cross the line.</div>
+  </div>
+</div>
+
+<!-- PAUSE -->
+<div id="scrPause" class="screen hidden">
+  <h1>Paused</h1>
+  <div class="card" style="display:flex;flex-direction:column;gap:12px;">
+    <button id="btnResume" class="primary">&#9654; Resume</button>
+    <button id="btnPauseRestart">Restart song</button>
+    <button id="btnQuit">Back to the set</button>
   </div>
 </div>
 
@@ -143,7 +156,7 @@ window.addEventListener("resize", applyLayout);
 let ac = null;              // AudioContext, created on first gesture
 let songBuffer = null, chart = null, source = null;
 let startAt = 0;
-let playing = false, difficulty = "standard";
+let playing = false, paused = false, difficulty = "standard";
 let latency = parseFloat(localStorage.getItem("oakLatency") || "0");
 
 let notes = [];
@@ -155,7 +168,7 @@ let score = 0, combo = 0, maxCombo = 0;
 let counts = { perfect:0, great:0, ok:0, miss:0 };
 
 const $ = id => document.getElementById(id);
-const screens = { title:$("scrTitle"), cal:$("scrCal"), results:$("scrResults") };
+const screens = { title:$("scrTitle"), cal:$("scrCal"), results:$("scrResults"), pause:$("scrPause") };
 function show(name) { for (const k in screens) screens[k].classList.toggle("hidden", k !== name); }
 function hideAll() { for (const k in screens) screens[k].classList.add("hidden"); }
 
@@ -200,6 +213,7 @@ function songTime() { return ac.currentTime - startAt; }
 // state bridge for the 3D stage
 window.OakGame = {
   get playing() { return playing; },
+  get paused() { return paused; },
   get bpm() { return chart ? chart.bpm : 120; },
   time() { return (playing && ac) ? songTime() : 0; },
   hits: [],                 // {lane, grade} pushed on judged hits
@@ -217,14 +231,35 @@ function startPlay() {
   const t0 = ctx.currentTime + 0.1;
   source.start(t0 + LEAD_IN);
   startAt = t0 + LEAD_IN;
-  playing = true;
+  playing = true; paused = false;
   hideAll();
+  $("btnPause").classList.remove("hidden");
   requestAnimationFrame(frame);
 }
 
-function endPlay() {
-  playing = false;
+function pauseGame() {
+  if (!playing || paused) return;
+  paused = true;
+  ac.suspend();                      // freezes the audio clock: notes, music,
+  $("btnPause").classList.add("hidden");   // sway all halt in sync
+  show("pause");
+}
+
+function resumeGame() {
+  if (!paused) return;
+  paused = false;
+  ac.resume();
+  hideAll();
+  $("btnPause").classList.remove("hidden");
+  requestAnimationFrame(frame);
+}
+
+function endPlay(showResults = true) {
+  playing = false; paused = false;
+  $("btnPause").classList.add("hidden");
+  if (ac && ac.state === "suspended") ac.resume();
   try { source && source.stop(); } catch(e) {}
+  if (!showResults) { show("title"); return; }
   const total = counts.perfect + counts.great + counts.ok + counts.miss;
   const acc = total ? (counts.perfect + counts.great*0.6 + counts.ok*0.3) / total : 0;
   const rank = acc > .95 ? "S" : acc > .88 ? "A" : acc > .75 ? "B" : acc > .6 ? "C" : "D";
@@ -241,7 +276,7 @@ function endPlay() {
 
 /* ---------------- judgement ---------------- */
 function pressLane(lane) {
-  if (!playing) return;
+  if (!playing || paused) return;
   const now = songTime() - latency;
   laneFlash[lane] = songTime();
   let best = null, bestDist = Infinity;
@@ -313,7 +348,7 @@ function edgeX(u, v) {
 function vy(v) { return HIT_Y + (HOR_Y - HIT_Y) * proj(Math.max(v, 0)); }
 
 function frame() {
-  if (!playing) return;
+  if (!playing || paused) return;
   const now = songTime() - latency;
   sweepMisses(now);
   processHolds(now);
@@ -517,7 +552,7 @@ document.addEventListener("keydown", e => {
   const lane = LANE_KEYS.indexOf(e.code);
   if (calActive) { calTap(); return; }
   if (lane >= 0) { e.preventDefault(); laneHeld[lane] = true; pressLane(lane); }
-  if (e.code === "Escape" && playing) { endPlay(); }
+  if (e.code === "Escape" && playing) { paused ? resumeGame() : pauseGame(); }
 });
 document.addEventListener("keyup", e => {
   const lane = LANE_KEYS.indexOf(e.code);
@@ -561,6 +596,10 @@ $("btnPlay").onclick = async () => {
 $("btnCal").onclick = () => startCal();
 $("btnRetry").onclick = () => startPlay();
 $("btnBack").onclick = () => show("title");
+$("btnPause").onclick = () => pauseGame();
+$("btnResume").onclick = () => resumeGame();
+$("btnPauseRestart").onclick = () => { paused = false; ac.resume(); startPlay(); };
+$("btnQuit").onclick = () => endPlay(false);
 </script>
 
 <script type="importmap">
@@ -658,7 +697,7 @@ function tick() {
   requestAnimationFrame(tick);
   const gm = window.OakGame;
   let phase;
-  if (gm && gm.playing) {
+  if (gm && gm.playing && !gm.paused) {
     const beatLen = 60 / gm.bpm;
     phase = Math.max(0, gm.time()) / beatLen;       // beats elapsed
     // drain hit events -> flash the stage in lane color
