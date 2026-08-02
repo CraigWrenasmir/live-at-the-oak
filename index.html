@@ -10,8 +10,11 @@
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { height:100%; background:#0a0708; overflow:hidden; touch-action:none;
     font-family:"Courier New", ui-monospace, monospace; color:#e8ddc9; }
-  #stage { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
-  canvas { image-rendering:pixelated; image-rendering:crisp-edges; width:100%; height:100%; object-fit:contain; }
+  #stage { position:fixed; inset:0; }
+  #stage canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain;
+    image-rendering:pixelated; image-rendering:crisp-edges; }
+  #bg3d { z-index:0; }
+  #cv { z-index:1; }
   /* scanlines + vignette over everything */
   #crt { position:fixed; inset:0; pointer-events:none; z-index:50;
     background:
@@ -19,7 +22,7 @@
       radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%); }
   .screen { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
     align-items:center; justify-content:center; gap:18px; padding:24px; text-align:center;
-    background:radial-gradient(ellipse at 50% 30%, #241417 0%, #0a0708 70%); }
+    background:radial-gradient(ellipse at 50% 30%, rgba(36,20,23,.88) 0%, rgba(10,7,8,.92) 70%); }
   .hidden { display:none !important; }
   h1 { font-size:clamp(20px,4.5vw,40px); letter-spacing:2px; text-transform:uppercase;
     color:#7ee787; text-shadow: 2px 0 rgba(224,74,58,.8), -2px 0 rgba(58,125,224,.8), 0 0 18px rgba(126,231,135,.35);
@@ -46,7 +49,10 @@
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="cv"></canvas></div>
+<div id="stage">
+  <canvas id="bg3d"></canvas>
+  <canvas id="cv"></canvas>
+</div>
 <div id="crt"></div>
 
 <!-- TITLE / SONG SELECT -->
@@ -95,7 +101,8 @@
 /* ================= Live at The Oak — core timing engine =================
    All gameplay time derives from AudioContext.currentTime. The visual
    frame is a pure function of song position; a dropped frame can never
-   desync judgement.                                                     */
+   desync judgement. The 3D stage (module script below) renders behind
+   this canvas and reads song state through window.OakGame.            */
 
 const SONGS = [{
   label: "01 — CRAFLUROPI — 120 BPM",
@@ -117,13 +124,13 @@ const g = cv.getContext("2d");
 
 let ac = null;              // AudioContext, created on first gesture
 let songBuffer = null, chart = null, source = null;
-let startAt = 0;            // ac.currentTime when songTime === -LEAD_IN hits 0
+let startAt = 0;
 let playing = false, difficulty = "standard";
 let latency = parseFloat(localStorage.getItem("oakLatency") || "0");
 
-let notes = [];             // live copies: {t, lane, state}
-let laneFlash = [0,0,0,0];  // receptor flash timestamps (songTime)
-let judgements = [];        // floating popups {text, color, t, lane}
+let notes = [];
+let laneFlash = [0,0,0,0];
+let judgements = [];
 let score = 0, combo = 0, maxCombo = 0;
 let counts = { perfect:0, great:0, ok:0, miss:0 };
 
@@ -148,6 +155,14 @@ async function loadSong(song, diff) {
 }
 
 function songTime() { return ac.currentTime - startAt; }
+
+// state bridge for the 3D stage
+window.OakGame = {
+  get playing() { return playing; },
+  get bpm() { return chart ? chart.bpm : 120; },
+  time() { return (playing && ac) ? songTime() : 0; },
+  hits: [],                 // {lane, grade} pushed on judged hits
+};
 
 function startPlay() {
   const ctx = audioCtx();
@@ -193,7 +208,7 @@ function pressLane(lane) {
     if (n.state !== "pending" || n.lane !== lane) continue;
     const d = Math.abs(n.t - now);
     if (d < bestDist) { bestDist = d; best = n; }
-    if (n.t - now > WINDOWS.ok) break;   // notes sorted; nothing closer ahead
+    if (n.t - now > WINDOWS.ok) break;
   }
   if (!best || bestDist > WINDOWS.ok) return;   // empty strum: no penalty
   let grade = bestDist <= WINDOWS.perfect ? "perfect" : bestDist <= WINDOWS.great ? "great" : "ok";
@@ -203,6 +218,7 @@ function pressLane(lane) {
   const mult = 1 + Math.min(3, Math.floor(combo / 10));
   score += POINTS[grade] * mult;
   judgements.push({ text: grade.toUpperCase(), grade, t: songTime(), lane });
+  window.OakGame.hits.push({ lane, grade });
 }
 
 function sweepMisses(now) {
@@ -217,15 +233,14 @@ function sweepMisses(now) {
 }
 
 /* ---------------- rendering ---------------- */
-// highway geometry: v=0 at hit line, v=1 at horizon
 const HIT_Y = H - 46, HOR_Y = 78, W_NEAR = 400, W_FAR = 90, CX = W/2;
-function proj(v) { const a = 0.6; return (v * (1 + a)) / (v + a); }   // perspective ease
+function proj(v) { const a = 0.6; return (v * (1 + a)) / (v + a); }
 function laneX(lane, v) {
   const p = proj(Math.max(v, 0));
   const w = W_NEAR + (W_FAR - W_NEAR) * p;
   return CX + ((lane + 0.5) / 4 - 0.5) * w;
 }
-function edgeX(u, v) {  // u in [0,1] across highway
+function edgeX(u, v) {
   const p = proj(Math.max(v, 0));
   const w = W_NEAR + (W_FAR - W_NEAR) * p;
   return CX + (u - 0.5) * w;
@@ -237,27 +252,29 @@ function frame() {
   const now = songTime() - latency;
   sweepMisses(now);
 
-  // background: dark pub, warm stage glow
-  g.fillStyle = "#0a0708"; g.fillRect(0, 0, W, H);
-  const glow = g.createRadialGradient(CX, HOR_Y, 10, CX, HOR_Y, 300);
-  glow.addColorStop(0, "rgba(232,197,58,0.18)");
-  glow.addColorStop(0.5, "rgba(224,74,58,0.07)");
-  glow.addColorStop(1, "transparent");
-  g.fillStyle = glow; g.fillRect(0, 0, W, H);
+  const has3d = window.OakBG && window.OakBG.ready;
+  if (has3d) {
+    g.clearRect(0, 0, W, H);        // stage shows through
+  } else {
+    g.fillStyle = "#0a0708"; g.fillRect(0, 0, W, H);
+    const glow = g.createRadialGradient(CX, HOR_Y, 10, CX, HOR_Y, 300);
+    glow.addColorStop(0, "rgba(232,197,58,0.18)");
+    glow.addColorStop(0.5, "rgba(224,74,58,0.07)");
+    glow.addColorStop(1, "transparent");
+    g.fillStyle = glow; g.fillRect(0, 0, W, H);
+    g.font = "10px 'Courier New', monospace"; g.textAlign = "center";
+    g.fillStyle = "rgba(224,74,58,.8)"; g.fillText("WRENASMIR — LIVE AT THE OAK", CX+1, HOR_Y-26);
+    g.fillStyle = "rgba(62,197,75,.8)";  g.fillText("WRENASMIR — LIVE AT THE OAK", CX-1, HOR_Y-27);
+  }
+  g.textAlign = "center";
 
-  // banner text at horizon (the venue screen)
-  g.font = "10px 'Courier New', monospace"; g.textAlign = "center";
-  g.fillStyle = "rgba(224,74,58,.8)"; g.fillText("WRENASMIR — LIVE AT THE OAK", CX+1, HOR_Y-26);
-  g.fillStyle = "rgba(62,197,75,.8)";  g.fillText("WRENASMIR — LIVE AT THE OAK", CX-1, HOR_Y-27);
-
-  // highway body
-  g.fillStyle = "#191014";
+  // highway body — slightly translucent so the stage reads behind it
+  g.fillStyle = has3d ? "rgba(18,11,14,0.82)" : "#191014";
   g.beginPath();
   g.moveTo(edgeX(0,0), vy(0)); g.lineTo(edgeX(1,0), vy(0));
   g.lineTo(edgeX(1,1), vy(1)); g.lineTo(edgeX(0,1), vy(1));
   g.closePath(); g.fill();
 
-  // beat lines scrolling down the highway
   const beatLen = 60 / chart.bpm;
   const firstBeat = Math.ceil((now - 0.05) / beatLen) * beatLen;
   g.strokeStyle = "rgba(232,221,201,0.10)"; g.lineWidth = 1;
@@ -265,13 +282,11 @@ function frame() {
     const v = (bt - now) / LOOKAHEAD; if (v < 0 || v > 1) continue;
     g.beginPath(); g.moveTo(edgeX(0,v), vy(v)); g.lineTo(edgeX(1,v), vy(v)); g.stroke();
   }
-  // lane dividers
   g.strokeStyle = "rgba(232,221,201,0.16)";
   for (let i = 0; i <= 4; i++) {
     g.beginPath(); g.moveTo(edgeX(i/4,0), vy(0)); g.lineTo(edgeX(i/4,1), vy(1)); g.stroke();
   }
 
-  // receptors at the hit line
   for (let l = 0; l < 4; l++) {
     const x = laneX(l, 0), y = vy(0);
     const since = songTime() - laneFlash[l];
@@ -287,7 +302,6 @@ function frame() {
     g.fillText(KEY_LABELS[l], x, y + 26);
   }
 
-  // notes (draw far-to-near so near gems overlap)
   const visible = [];
   for (const n of notes) {
     if (n.state !== "pending") continue;
@@ -308,7 +322,6 @@ function frame() {
     g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.stroke();
   }
 
-  // judgement popups
   const jcolors = { perfect:"#7ee787", great:"#e8c53a", ok:"#b8a98f", miss:"#e04a3a" };
   judgements = judgements.filter(j => songTime() - j.t < 0.6);
   for (const j of judgements) {
@@ -320,7 +333,6 @@ function frame() {
     g.globalAlpha = 1;
   }
 
-  // HUD
   g.textAlign = "left"; g.font = "bold 16px monospace";
   g.fillStyle = "#e8ddc9"; g.fillText(score.toLocaleString(), 12, 24);
   const mult = 1 + Math.min(3, Math.floor(combo / 10));
@@ -331,7 +343,6 @@ function frame() {
     g.fillStyle = "#e8c53a"; g.globalAlpha = 0.9;
     g.fillText(combo + "", CX, 40); g.globalAlpha = 1;
   }
-  // count-in
   if (now < 0) {
     g.textAlign = "center"; g.font = "bold 34px monospace"; g.fillStyle = "#7ee787";
     g.fillText(Math.ceil(-now / (60/chart.bpm)) + "", CX, H/2 - 40);
@@ -393,7 +404,6 @@ cv.addEventListener("pointerdown", e => {
   if (calActive) { calTap(); return; }
   if (!playing) return;
   const r = cv.getBoundingClientRect();
-  // object-fit:contain — map back to internal canvas space
   const scale = Math.min(r.width / W, r.height / H);
   const ox = (r.width - W*scale) / 2;
   const x = (e.clientX - r.left - ox) / scale;
@@ -417,9 +427,102 @@ $("btnPlay").onclick = async () => {
   $("btnPlay").innerHTML = "&#9654; Take the stage";
 };
 $("btnCal").onclick = () => startCal();
-$("btnCalDone").onclick = () => finishCal(false);
 $("btnRetry").onclick = () => startPlay();
 $("btnBack").onclick = () => show("title");
+</script>
+
+<script type="importmap">
+{ "imports": { "three": "./assets/vendor/three.module.js" } }
+</script>
+<script type="module">
+/* ================= 3D stage behind the highway =================
+   Blender exports Z-up -> glTF Y-up: character height is +Y and he
+   faces +Z, toward the camera. Animation is procedural, driven by
+   the chart BPM through window.OakGame — never by wall-clock guesses,
+   so the sway locks to the music exactly like the notes do.        */
+import * as THREE from "three";
+import { GLTFLoader } from "./assets/vendor/GLTFLoader.js";
+
+const LANE_RGB = [0x3ec54b, 0xe04a3a, 0xe8c53a, 0x3a7de0];
+const bgcv = document.getElementById("bg3d");
+const renderer = new THREE.WebGLRenderer({ canvas: bgcv, antialias: false });
+renderer.setPixelRatio(1);
+renderer.setSize(640, 360, false);        // PSX res; CSS upscales pixelated
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0708);
+scene.fog = new THREE.Fog(0x0a0708, 6, 12);
+
+const camera = new THREE.PerspectiveCamera(38, 640/360, 0.1, 40);
+camera.position.set(0, 1.55, 3.15);
+camera.lookAt(0, 1.02, 0);
+
+// warm pub lighting
+scene.add(new THREE.AmbientLight(0x51403a, 1.1));
+const key = new THREE.SpotLight(0xffd9a0, 55, 14, 0.7, 0.45);
+key.position.set(0.8, 3.6, 2.6); key.target.position.set(0, 1, 0.3);
+scene.add(key, key.target);
+const rim1 = new THREE.PointLight(0xb03a8e, 8, 7);  rim1.position.set(-2.2, 1.6, -0.8);
+const rim2 = new THREE.PointLight(0x2a6a8e, 8, 7);  rim2.position.set(2.2, 1.4, -0.6);
+scene.add(rim1, rim2);
+// hit flash light above the player, colored per lane on hits
+const flash = new THREE.PointLight(0xffffff, 0, 6);
+flash.position.set(0, 2.3, 1.2);
+scene.add(flash);
+
+const charGroup = new THREE.Group();
+const headPivot = new THREE.Group();
+scene.add(charGroup);
+
+const loader = new GLTFLoader();
+const HEAD_PARTS = ["Head", "Face", "CapCrown", "CapBrim", "CapButton", "CapApple", "CapLeaf"];
+let flashPower = 0;
+
+Promise.all([
+  loader.loadAsync("assets/stage.glb"),
+  loader.loadAsync("assets/wrenasmir.glb"),
+]).then(([stage, wren]) => {
+  scene.add(stage.scene);
+  charGroup.add(wren.scene);
+  // re-root the head parts on a pivot at the neck so he can nod
+  headPivot.position.set(0, 1.5, 0);
+  charGroup.add(headPivot);
+  const parts = [];
+  wren.scene.traverse(o => { if (HEAD_PARTS.includes(o.name)) parts.push(o); });
+  parts.forEach(p => headPivot.attach(p));
+  window.OakBG = { ready: true };
+  console.log("[Oak3D] stage ready,", parts.length, "head parts on pivot");
+}).catch(err => {
+  console.error("[Oak3D] load failed, 2D fallback stays on", err);
+});
+
+function tick() {
+  requestAnimationFrame(tick);
+  const gm = window.OakGame;
+  let phase;
+  if (gm && gm.playing) {
+    const beatLen = 60 / gm.bpm;
+    phase = Math.max(0, gm.time()) / beatLen;       // beats elapsed
+    // drain hit events -> flash the stage in lane color
+    while (gm.hits.length) {
+      const h = gm.hits.shift();
+      flash.color.setHex(LANE_RGB[h.lane]);
+      flashPower = h.grade === "perfect" ? 26 : 14;
+    }
+  } else {
+    phase = performance.now() / 1000 * 0.45;        // slow idle sway on menus
+  }
+  const sway = Math.sin(phase * Math.PI);           // one full lean per 2 beats
+  charGroup.rotation.z = sway * 0.045;
+  charGroup.position.y = -Math.abs(Math.sin(phase * Math.PI)) * 0.02;
+  const beatPulse = Math.pow(Math.max(0, Math.cos(phase * 2 * Math.PI)), 3);
+  headPivot.rotation.x = beatPulse * 0.14;          // nod lands on each beat
+  flashPower *= 0.88;
+  flash.intensity = flashPower;
+  renderer.render(scene, camera);
+}
+tick();
 </script>
 </body>
 </html>
