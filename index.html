@@ -78,7 +78,7 @@
     <button id="btnPlay" class="primary">&#9654; Take the stage</button>
     <button id="btnCal">Calibrate timing</button>
     <div id="hint">Keys <kbd>D</kbd><kbd>F</kbd><kbd>J</kbd><kbd>K</kbd> or tap the four lanes.<br>
-      Hit the gems as they cross the line.</div>
+      Hit the gems as they cross the line. <kbd>P</kbd> pauses.</div>
   </div>
 </div>
 
@@ -552,7 +552,7 @@ document.addEventListener("keydown", e => {
   const lane = LANE_KEYS.indexOf(e.code);
   if (calActive) { calTap(); return; }
   if (lane >= 0) { e.preventDefault(); laneHeld[lane] = true; pressLane(lane); }
-  if (e.code === "Escape" && playing) { paused ? resumeGame() : pauseGame(); }
+  if (e.code === "KeyP" && playing) { paused ? resumeGame() : pauseGame(); }
 });
 document.addEventListener("keyup", e => {
   const lane = LANE_KEYS.indexOf(e.code);
