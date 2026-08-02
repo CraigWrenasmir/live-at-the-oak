@@ -1,0 +1,10 @@
+<!DOCTYPE html><html><body><script>
+const ctx = new AudioContext();
+console.log("ctx state:", ctx.state);
+ctx.resume().then(() => console.log("after resume:", ctx.state));
+let n = 0;
+const iv = setInterval(() => {
+  console.log("t=" + ctx.currentTime.toFixed(3), "state=" + ctx.state);
+  if (++n >= 4) clearInterval(iv);
+}, 1500);
+</script></body></html>

@@ -190,6 +190,13 @@ const AUDIO_OFFSET = (() => {
   const v = parseFloat(new URLSearchParams(location.search).get("ao"));
   return isNaN(v) ? 0.15 : v;
 })();
+// demo/recording rig: ?demo=<slug>&at=<seconds>&rec=<seconds> — a bot plays
+// the chart perfectly from <at>, and the page records itself for <rec>s.
+const QP = new URLSearchParams(location.search);
+const DEMO = QP.get("demo");
+const DEMO_AT = parseFloat(QP.get("at") || "0");
+const DEMO_REC = parseFloat(QP.get("rec") || "0");
+const demoHolds = [0, 0, 0, 0];
 
 // internal PSX-ish resolution, upscaled. Landscape keeps the original
 // composition exactly; portrait (phones upright) restacks: stage on top,
@@ -282,10 +289,55 @@ async function loadSetlist() {
     el.appendChild(b);
   });
 }
-loadSetlist().catch(err => {
+loadSetlist().then(() => {
+  if (!DEMO) return;
+  const i = SONGS.findIndex(s => s.slug === DEMO);
+  if (i < 0) { console.error("[demo] unknown slug", DEMO); return; }
+  songIdx = i;
+  difficulty = QP.get("diff") || "standard";
+  return loadSong(SONGS[i], difficulty).then(startPlay);
+}).catch(err => {
   $("setlist").innerHTML = "<div class='sub'>setlist failed to load</div>";
   console.error(err);
 });
+
+/* ---- self-recorder: composite both canvases + scanlines, save via PUT ---- */
+if (DEMO && DEMO_REC) {
+  const bg3dEl = document.getElementById("bg3d");
+  const rc = document.createElement("canvas");
+  const rg = rc.getContext("2d");
+  const mr = { rec: null, started: false };
+  (function drawRec() {
+    requestAnimationFrame(drawRec);
+    if (rc.width !== cv.width * 2) { rc.width = cv.width * 2; rc.height = cv.height * 2; }
+    rg.imageSmoothingEnabled = false;
+    rg.fillStyle = "#0a0708";
+    rg.fillRect(0, 0, rc.width, rc.height);
+    rg.drawImage(bg3dEl, 0, 0, rc.width, rc.height);
+    rg.drawImage(cv, 0, 0, rc.width, rc.height);
+    rg.fillStyle = "rgba(0,0,0,0.20)";
+    for (let y = 0; y < rc.height; y += 4) rg.fillRect(0, y, rc.width, 1);
+    const vg = rg.createRadialGradient(rc.width/2, rc.height/2, rc.height*0.42,
+                                       rc.width/2, rc.height/2, rc.height*0.85);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.45)");
+    rg.fillStyle = vg; rg.fillRect(0, 0, rc.width, rc.height);
+    if (!mr.started && playing && ac && songTime() >= DEMO_AT + 1) {
+      mr.started = true;                       // frame 0 === song time DEMO_AT+1
+      mr.rec = new MediaRecorder(rc.captureStream(30),
+        { mimeType: "video/webm;codecs=vp9", videoBitsPerSecond: 12_000_000 });
+      const chunks = [];
+      mr.rec.ondataavailable = e => chunks.push(e.data);
+      mr.rec.onstop = async () => {
+        await fetch("http://localhost:8042/save?name=" + DEMO + ".webm",
+                    { method: "PUT", body: new Blob(chunks, { type: "video/webm" }) });
+        console.log("[demo] recording uploaded");
+        document.title = "REC-DONE";
+      };
+      mr.rec.start();
+      setTimeout(() => mr.rec.stop(), DEMO_REC * 1000);
+    }
+  })();
+}
 
 function songTime() { return ac.currentTime - startAt; }
 
@@ -310,8 +362,8 @@ function startPlay() {
   source.buffer = songBuffer;
   source.connect(ctx.destination);
   const t0 = ctx.currentTime + 0.1;
-  source.start(t0 + LEAD_IN + AUDIO_OFFSET);
-  startAt = t0 + LEAD_IN;
+  source.start(t0 + LEAD_IN + AUDIO_OFFSET, DEMO ? DEMO_AT : 0);
+  startAt = t0 + LEAD_IN - (DEMO ? DEMO_AT : 0);
   // ?sync — timing diagnostic: click on every chart beat, scheduled on the
   // same audio clock as the tiles. Clicks on the song's beat = charts true.
   if (location.search.includes("sync")) {
@@ -330,6 +382,11 @@ function startPlay() {
   playing = true; paused = false;
   hideAll();
   $("btnPause").classList.remove("hidden");
+  if (DEMO) {
+    combo = 100; maxCombo = 100;              // arrive mid-set, lights already up
+    for (const n of notes) if (n.t < DEMO_AT + 0.2) n.state = "done";
+    $("btnPause").classList.add("hidden");
+  }
   requestAnimationFrame(frame);
 }
 
@@ -540,6 +597,18 @@ function vy(v) { return HIT_Y + (HOR_Y - HIT_Y) * proj(Math.max(v, 0)); }
 function frame() {
   if (!playing || paused) return;
   const now = songTime() - latency;
+  if (DEMO) {                                  // the bot: every note, perfect
+    for (const n of notes) {
+      if (n.state !== "pending") continue;
+      if (n.t - now > 0.01) break;
+      laneHeld[n.lane] = true;
+      pressLane(n.lane);
+      if (n.len) demoHolds[n.lane] = n.t + n.len;
+    }
+    for (let l = 0; l < 4; l++) {
+      if (demoHolds[l] && now > demoHolds[l]) { demoHolds[l] = 0; releaseLane(l); }
+    }
+  }
   sweepMisses(now);
   processHolds(now);
 
@@ -719,7 +788,7 @@ function frame() {
 
   // now-playing chyron: slides in over the first seconds, then leaves the
   // stage clean. Bottom-left in landscape; under the score HUD in portrait.
-  const clock = now + LEAD_IN;                  // seconds since pressing play
+  const clock = DEMO ? now - DEMO_AT - 1 : now + LEAD_IN;   // demo clips get the chyron too
   const introA = Math.max(0, Math.min(1, clock / 0.5, (7.5 - clock) / 0.8));
   // farewell: the name flickers back up over the last bars
   const oc = now - (chart.duration - 8);
@@ -936,7 +1005,8 @@ const LANE_RGB = [0x3ec54b, 0xe04a3a, 0xe8c53a, 0x3a7de0];
 const bgcv = document.getElementById("bg3d");
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ canvas: bgcv, antialias: false });
+  renderer = new THREE.WebGLRenderer({ canvas: bgcv, antialias: false,
+    preserveDrawingBuffer: true });   // lets the self-recorder read the 3D layer
 } catch (err) {
   console.error("[Oak3D] no WebGL, 2D fallback stays on", err);
   throw err;
