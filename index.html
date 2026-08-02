@@ -218,10 +218,30 @@ function audioCtx() {
   return ac;
 }
 
-async function loadSong(song, diff) {
+async function loadSong(song, diff, onProgress) {
   const ctx = audioCtx();
   chart = await (await fetch(song.charts[diff])).json();
-  const raw = await (await fetch(chart.audio)).arrayBuffer();
+  const resp = await fetch(chart.audio);
+  const total = +resp.headers.get("Content-Length") || 0;
+  let raw;
+  if (resp.body && total) {
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); got += value.length;
+      onProgress && onProgress(got / total);
+    }
+    const merged = new Uint8Array(got);
+    let o = 0;
+    for (const c of chunks) { merged.set(c, o); o += c.length; }
+    raw = merged.buffer;
+  } else {
+    raw = await resp.arrayBuffer();
+  }
+  onProgress && onProgress(1);
   songBuffer = await ctx.decodeAudioData(raw);
 }
 
@@ -450,6 +470,23 @@ function processHolds(now) {
 
 /* ---------------- rendering ---------------- */
 function proj(v) { const a = 0.6; return (v * (1 + a)) / (v + a); }
+
+/* one silhouette per lane so colour is never the only signal:
+   0 green circle, 1 red diamond, 2 yellow square, 3 blue triangle */
+function gemPath(lane, x, y, rx, ry) {
+  g.beginPath();
+  if (lane === 0) {
+    g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  } else if (lane === 1) {
+    g.moveTo(x, y - ry * 1.15); g.lineTo(x + rx, y); g.lineTo(x, y + ry * 1.15);
+    g.lineTo(x - rx, y); g.closePath();
+  } else if (lane === 2) {
+    g.rect(x - rx * 0.85, y - ry * 0.95, rx * 1.7, ry * 1.9);
+  } else {
+    g.moveTo(x, y - ry * 1.2); g.lineTo(x + rx, y + ry * 0.85);
+    g.lineTo(x - rx, y + ry * 0.85); g.closePath();
+  }
+}
 function laneX(lane, v) {
   const p = proj(Math.max(v, 0));
   const w = W_NEAR + (W_FAR - W_NEAR) * p;
@@ -510,9 +547,9 @@ function frame() {
     g.lineWidth = 2.5;
     g.strokeStyle = LANE_COLORS[l];
     g.globalAlpha = lit ? 1 : 0.65;
-    g.beginPath(); g.ellipse(x, y, 20, 9, 0, 0, Math.PI*2); g.stroke();
+    gemPath(l, x, y, 20, 9); g.stroke();
     if (lit) { g.globalAlpha = 0.35; g.fillStyle = LANE_COLORS[l];
-      g.beginPath(); g.ellipse(x, y, 20, 9, 0, 0, Math.PI*2); g.fill(); }
+      gemPath(l, x, y, 20, 9); g.fill(); }
     g.globalAlpha = 1;
     g.fillStyle = "rgba(232,221,201,.5)"; g.font = "9px monospace";
     g.fillText(KEY_LABELS[l], x, y + 26);
@@ -548,11 +585,11 @@ function frame() {
     const p = 1 - proj(Math.max(v,0));
     const rx = 8 + 12*p, ry = 4 + 6*p;
     g.fillStyle = LANE_COLORS[n.lane];
-    g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.fill();
+    gemPath(n.lane, x, y, rx, ry); g.fill();
     g.fillStyle = "rgba(255,255,255,.85)";
-    g.beginPath(); g.ellipse(x, y - ry*0.35, rx*0.45, ry*0.4, 0, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.ellipse(x, y - ry*0.3, rx*0.35, ry*0.32, 0, 0, Math.PI*2); g.fill();
     g.strokeStyle = "rgba(0,0,0,.5)"; g.lineWidth = 1.5;
-    g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.stroke();
+    gemPath(n.lane, x, y, rx, ry); g.stroke();
   }
 
   const jcolors = { perfect:"#7ee787", great:"#e8c53a", ok:"#b8a98f", miss:"#e04a3a" };
@@ -608,13 +645,13 @@ function drawPreview() {
   g.textAlign = "center";
   for (let l = 0; l < 4; l++) {
     g.lineWidth = 2.5; g.strokeStyle = LANE_COLORS[l]; g.globalAlpha = 0.65;
-    g.beginPath(); g.ellipse(laneX(l,0), vy(0), 20, 9, 0, 0, Math.PI*2); g.stroke();
+    gemPath(l, laneX(l,0), vy(0), 20, 9); g.stroke();
     g.globalAlpha = 1;
   }
   for (const [l, v] of [[0,0.15],[2,0.3],[1,0.5],[3,0.62],[2,0.8],[0,0.92]]) {
     const x = laneX(l, v), y = vy(v), p = 1 - proj(v);
     g.fillStyle = LANE_COLORS[l];
-    g.beginPath(); g.ellipse(x, y, 8+12*p, 4+6*p, 0, 0, Math.PI*2); g.fill();
+    gemPath(l, x, y, 8+12*p, 4+6*p); g.fill();
   }
 }
 if (location.search.includes("stageview")) {
@@ -697,9 +734,12 @@ document.getElementById("scrCal").addEventListener("pointerdown", () => calTap()
 $("btnStd").onclick = () => { difficulty = "standard"; $("btnStd").classList.add("active"); $("btnHard").classList.remove("active"); };
 $("btnHard").onclick = () => { difficulty = "hard"; $("btnHard").classList.add("active"); $("btnStd").classList.remove("active"); };
 $("btnPlay").onclick = async () => {
-  $("btnPlay").textContent = "Loading…";
+  const b = $("btnPlay");
+  b.textContent = "Loading…";
   try {
-    await loadSong(SONGS[songIdx], difficulty);
+    await loadSong(SONGS[songIdx], difficulty, p => {
+      b.textContent = p >= 1 ? "Decoding…" : `Loading… ${Math.round(p * 100)}%`;
+    });
     startPlay();
   } catch (err) {
     $("btnPlay").textContent = "Load failed — serve over http";
