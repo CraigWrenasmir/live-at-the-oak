@@ -61,18 +61,6 @@
  },
  {
   "n": 6,
-  "slug": "mabon",
-  "title": "Mabon",
-  "bpm": 86.13,
-  "duration": 301.99,
-  "audio": "audio/mabon.mp3",
-  "charts": {
-   "standard": "charts/mabon.json",
-   "hard": "charts/mabon-hard.json"
-  }
- },
- {
-  "n": 7,
   "slug": "crafluropi",
   "title": "Crafluropi",
   "bpm": 120.19,
@@ -81,6 +69,18 @@
   "charts": {
    "standard": "charts/crafluropi.json",
    "hard": "charts/crafluropi-hard.json"
+  }
+ },
+ {
+  "n": 7,
+  "slug": "mabon",
+  "title": "Mabon",
+  "bpm": 86.13,
+  "duration": 301.99,
+  "audio": "audio/mabon.mp3",
+  "charts": {
+   "standard": "charts/mabon.json",
+   "hard": "charts/mabon-hard.json"
   }
  }
 ]

@@ -5,8 +5,8 @@ from pathlib import Path
 
 SET = [(1, "rdst-gm", "Rdst Gm"), (2, "lucempight", "Lucempight"),
        (3, "spinet-destroiet", "Spinet Destroiet"), (4, "what-is-better", "What Is Better"),
-       (5, "the-way-that-i-go", "The Way That I Go"), (6, "mabon", "Mabon"),
-       (7, "crafluropi", "Crafluropi")]
+       (5, "the-way-that-i-go", "The Way That I Go"), (6, "crafluropi", "Crafluropi"),
+       (7, "mabon", "Mabon")]
 
 root = Path(__file__).resolve().parent.parent
 songs = []
