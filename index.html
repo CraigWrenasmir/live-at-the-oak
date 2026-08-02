@@ -54,6 +54,18 @@
   kbd { border:1px solid #6a4046; padding:1px 7px; margin:0 2px; background:#1a0f11; }
   #btnPause { position:fixed; top:10px; right:10px; z-index:30; width:auto;
     padding:8px 13px; font-size:14px; background:rgba(26,15,17,.7); }
+  .board { list-style:none; width:100%; text-align:left; font-size:13px;
+    display:flex; flex-direction:column; gap:3px; max-height:180px; overflow-y:auto; }
+  .board li { display:flex; gap:10px; padding:3px 8px; }
+  .board li .rank { color:#8a7a63; width:2ch; text-align:right; }
+  .board li .ini { color:#e8c53a; letter-spacing:2px; }
+  .board li .pts { margin-left:auto; }
+  .board li.you { background:#1d2e20; outline:1px solid #7ee787; }
+  .board li.you .ini { color:#7ee787; }
+  #lbInitials { font-family:inherit; font-size:20px; letter-spacing:6px; width:96px;
+    text-align:center; text-transform:uppercase; background:#1a0f11; color:#e8c53a;
+    border:2px solid #6a4046; padding:8px 4px; }
+  #lbInitials:focus { border-color:#e8c53a; outline:none; }
 </style>
 </head>
 <body>
@@ -76,7 +88,10 @@
       <button id="btnHard">Hard</button>
     </div>
     <button id="btnPlay" class="primary">&#9654; Take the stage</button>
-    <button id="btnCal">Calibrate timing</button>
+    <div class="row">
+      <button id="btnScores">High scores</button>
+      <button id="btnCal">Calibrate</button>
+    </div>
     <div id="hint">Keys <kbd>D</kbd><kbd>F</kbd><kbd>J</kbd><kbd>K</kbd> or tap the four lanes.<br>
       Hit the gems as they cross the line. <kbd>P</kbd> pauses.</div>
   </div>
@@ -109,10 +124,29 @@
     <div class="big" id="resScore">0</div>
     <div class="judgeCounts" id="resCounts"></div>
     <div class="sub" id="resAcc"></div>
+    <div style="width:100%">
+      <div class="sub" style="margin-bottom:6px">HIGH SCORES</div>
+      <ol class="board" id="lbList"><li>loading&hellip;</li></ol>
+    </div>
+    <div class="row" id="lbSubmitRow">
+      <input id="lbInitials" maxlength="3" placeholder="AAA" autocomplete="off">
+      <button id="btnSubmitScore" class="primary" style="flex:1">Post score</button>
+    </div>
+    <div class="sub hidden" id="lbStatus"></div>
     <div class="row">
       <button id="btnRetry" class="primary">Encore</button>
       <button id="btnBack">Set list</button>
     </div>
+  </div>
+</div>
+
+<!-- HIGH SCORES BROWSER -->
+<div id="scrScores" class="screen hidden">
+  <h1>High Scores</h1>
+  <div class="card" style="display:flex;flex-direction:column;gap:12px;">
+    <div class="sub" id="sbLabel"></div>
+    <ol class="board" id="sbList"></ol>
+    <button id="btnScoresBack">Back</button>
   </div>
 </div>
 
@@ -168,7 +202,8 @@ let score = 0, combo = 0, maxCombo = 0;
 let counts = { perfect:0, great:0, ok:0, miss:0 };
 
 const $ = id => document.getElementById(id);
-const screens = { title:$("scrTitle"), cal:$("scrCal"), results:$("scrResults"), pause:$("scrPause") };
+const screens = { title:$("scrTitle"), cal:$("scrCal"), results:$("scrResults"),
+                  pause:$("scrPause"), scores:$("scrScores") };
 function show(name) { for (const k in screens) screens[k].classList.toggle("hidden", k !== name); }
 function hideAll() { for (const k in screens) screens[k].classList.add("hidden"); }
 
@@ -271,8 +306,83 @@ function endPlay(showResults = true) {
     `<span>OK</span><b>${counts.ok}</b>` +
     `<span>Miss</span><b>${counts.miss}</b>`;
   $("resAcc").textContent = `Accuracy ${(acc*100).toFixed(1)}% — Max combo ${maxCombo}`;
+  lastResult = { song: SONGS[songIdx].slug, diff: difficulty, score,
+                 accuracy: +(acc*100).toFixed(1), maxCombo };
+  $("lbSubmitRow").classList.toggle("hidden", score <= 0);
+  $("lbStatus").classList.add("hidden");
   show("results");
+  loadBoard($("lbList"), lastResult.song, lastResult.diff, null);
 }
+
+/* ---------------- leaderboard ---------------- */
+const OAK_API = ["localhost", "127.0.0.1"].includes(location.hostname)
+  ? "http://localhost:8039" : "https://tools.theuniversalsandpit.org";
+const OAK_SALT = "oak-salt-v1-wrenasmir";
+let lastResult = null;
+
+async function sha256hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function loadBoard(el, song, diff, highlightId) {
+  el.innerHTML = "<li>loading&hellip;</li>";
+  try {
+    const d = await (await fetch(`${OAK_API}/api/oak/scores?song=${song}&diff=${diff}`)).json();
+    if (!d.scores || !d.scores.length) {
+      el.innerHTML = "<li>no scores yet — be the first</li>";
+      return;
+    }
+    el.innerHTML = "";
+    d.scores.forEach((r, i) => {
+      const li = document.createElement("li");
+      if (r.id === highlightId) li.className = "you";
+      li.innerHTML = `<span class="rank">${i+1}</span><span class="ini">${r.initials}</span>` +
+        `<span class="pts">${r.score.toLocaleString()}</span>`;
+      el.appendChild(li);
+    });
+  } catch (e) {
+    el.innerHTML = "<li>leaderboard unreachable</li>";
+  }
+}
+
+$("lbInitials").value = localStorage.getItem("oakInitials") || "";
+$("lbInitials").addEventListener("input", e => {
+  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, "");
+});
+$("btnSubmitScore").onclick = async () => {
+  const initials = $("lbInitials").value;
+  const st = $("lbStatus");
+  st.classList.remove("hidden");
+  if (!/^[A-Z]{3}$/.test(initials)) { st.textContent = "three letters, arcade style"; return; }
+  if (!lastResult) return;
+  localStorage.setItem("oakInitials", initials);
+  st.textContent = "posting…";
+  try {
+    const sig = await sha256hex(
+      `${lastResult.song}|${lastResult.diff}|${lastResult.score}|${initials}|${OAK_SALT}`);
+    const r = await (await fetch(`${OAK_API}/api/oak/scores`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...lastResult, initials, sig }),
+    })).json();
+    if (r.ok) {
+      st.textContent = `posted — rank #${r.rank}`;
+      $("lbSubmitRow").classList.add("hidden");
+      loadBoard($("lbList"), lastResult.song, lastResult.diff, r.id);
+    } else {
+      st.textContent = r.error || "rejected";
+    }
+  } catch (e) {
+    st.textContent = "leaderboard unreachable";
+  }
+};
+$("btnScores").onclick = () => {
+  const s = SONGS[songIdx];
+  $("sbLabel").textContent = `${s.title.toUpperCase()} — ${difficulty.toUpperCase()}`;
+  show("scores");
+  loadBoard($("sbList"), s.slug, difficulty, null);
+};
+$("btnScoresBack").onclick = () => show("title");
 
 /* ---------------- judgement ---------------- */
 function pressLane(lane) {
