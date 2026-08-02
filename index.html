@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Wrenasmir — Live at The Oak</title>
+<meta name="description" content="The playable gig: play along with all seven songs from Wrenasmir's Live at The Oak in a retro rhythm game. Post your score, chase the leaderboard.">
+<meta property="og:title" content="Wrenasmir — Live at The Oak: The Playable Gig">
+<meta property="og:description" content="Play along with the whole set in a retro rhythm game. Seven songs, two difficulties, a leaderboard waiting for your initials.">
+<meta property="og:image" content="https://theoak.wrenasmir.com/promo/og.png">
+<meta property="og:url" content="https://theoak.wrenasmir.com/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="promo/favicon.png">
+<link rel="apple-touch-icon" href="promo/apple-touch-icon.png">
 <style>
   :root { --green:#3ec54b; --red:#e04a3a; --yellow:#e8c53a; --blue:#3a7de0; }
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -297,6 +306,19 @@ function startPlay() {
   const t0 = ctx.currentTime + 0.1;
   source.start(t0 + LEAD_IN);
   startAt = t0 + LEAD_IN;
+  // ?sync — timing diagnostic: click on every chart beat, scheduled on the
+  // same audio clock as the tiles. Clicks on the song's beat = charts true.
+  if (location.search.includes("sync")) {
+    const bl = 60 / chart.bpm;
+    for (let bt = chart.beatOffset || 0; bt < chart.duration; bt += bl) {
+      const o = ctx.createOscillator(), gn = ctx.createGain();
+      o.frequency.value = 1500;
+      gn.gain.setValueAtTime(0.22, startAt + bt);
+      gn.gain.exponentialRampToValueAtTime(0.001, startAt + bt + 0.04);
+      o.connect(gn); gn.connect(ctx.destination);
+      o.start(startAt + bt); o.stop(startAt + bt + 0.05);
+    }
+  }
   nowPlaying = SONGS[songIdx].title.toUpperCase();
   nowPlayingDiff = difficulty.toUpperCase();
   playing = true; paused = false;

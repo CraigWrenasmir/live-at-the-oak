@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Oak promo poster</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden;
+    font-family:"Courier New", ui-monospace, monospace; background:#0a0708; }
+  #poster { position:fixed; inset:0; background-size:cover; background-position:center; }
+  #poster::after { content:""; position:fixed; inset:0; pointer-events:none;
+    background:
+      repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 2px, transparent 2px 6px),
+      radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.5) 100%); }
+  .scrim-top { position:fixed; top:0; left:0; right:0; height:34%;
+    background:linear-gradient(rgba(10,7,8,.92), transparent); }
+  .scrim-bot { position:fixed; bottom:0; left:0; right:0; height:30%;
+    background:linear-gradient(transparent, rgba(10,7,8,.94)); }
+  .top { position:fixed; top:4.5%; left:0; right:0; text-align:center; z-index:2; }
+  .bot { position:fixed; bottom:4.5%; left:0; right:0; text-align:center; z-index:2; }
+  h1 { color:#7ee787; text-transform:uppercase; letter-spacing:.06em; line-height:1.12;
+    text-shadow: .045em 0 rgba(224,74,58,.85), -.045em 0 rgba(58,125,224,.85),
+      0 0 .5em rgba(126,231,135,.35); }
+  .tag { color:#e8ddc9; letter-spacing:.14em; margin-top:.7em; }
+  .gems { margin-top:.8em; letter-spacing:.5em; }
+  .url { display:inline-block; color:#e8c53a; border:.13em solid #6a4046;
+    background:rgba(26,15,17,.85); padding:.55em 1.1em; letter-spacing:.09em; }
+  .sub { color:#b8a98f; letter-spacing:.16em; margin-top:.9em; }
+  /* size variants */
+  body.og h1 { font-size:86px; }  body.og .tag { font-size:26px; }
+  body.og .url { font-size:30px; } body.og .sub { font-size:19px; }
+  body.og .gems svg { width:36px; height:36px; }
+  body.square h1 { font-size:88px; } body.square .tag { font-size:28px; }
+  body.square .url { font-size:33px; } body.square .sub { font-size:21px; }
+  body.square .gems svg { width:40px; height:40px; }
+  body.story h1 { font-size:96px; } body.story .tag { font-size:32px; }
+  body.story .url { font-size:37px; } body.story .sub { font-size:24px; }
+  body.story .gems svg { width:48px; height:48px; }
+  body.story .top { top:6%; } body.story .bot { bottom:6%; }
+  .gems svg { vertical-align:middle; margin:0 .35em; }
+</style>
+</head>
+<body>
+<div id="poster"></div>
+<div class="scrim-top"></div>
+<div class="scrim-bot"></div>
+<div class="top">
+  <h1>Wrenasmir<br>Live at The Oak</h1>
+  <div class="tag">THE PLAYABLE GIG &mdash; SEVEN SONGS, ONE STAGE</div>
+</div>
+<div class="bot">
+  <div class="gems">
+    <svg viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="9" ry="7" fill="none" stroke="#3ec54b" stroke-width="2.4"/></svg>
+    <svg viewBox="0 0 20 20"><path d="M10 1 L19 10 L10 19 L1 10 Z" fill="none" stroke="#e04a3a" stroke-width="2.4"/></svg>
+    <svg viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="13" fill="none" stroke="#e8c53a" stroke-width="2.4"/></svg>
+    <svg viewBox="0 0 20 20"><path d="M10 1.5 L19 17 L1 17 Z" fill="none" stroke="#3a7de0" stroke-width="2.4"/></svg>
+  </div>
+  <div class="sub">PLAY ALONG &middot; POST YOUR SCORE &middot; TAKE THE SET HOME</div>
+  <div style="margin-top:.9em"><span class="url">theoak.wrenasmir.com</span></div>
+</div>
+<script>
+  const v = new URLSearchParams(location.search).get("v") || "og";
+  document.body.className = v;
+  const imgs = { og: "shot-wide.png", square: "shot-square.png", story: "shot-story.png" };
+  document.getElementById("poster").style.backgroundImage = `url(${imgs[v]})`;
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+<!DOCTYPE html><html><head><style>*{margin:0}body{background:#0a0708}</style></head><body>
+<canvas id="c" width="180" height="180"></canvas>
+<script>
+const g = document.getElementById("c").getContext("2d");
+g.fillStyle = "#0a0708"; g.fillRect(0,0,180,180);
+g.lineWidth = 11; g.lineJoin = "round";
+g.strokeStyle = "#3ec54b"; g.beginPath(); g.arc(51,51,26,0,7); g.stroke();
+g.strokeStyle = "#e04a3a"; g.beginPath(); g.moveTo(129,23); g.lineTo(157,51); g.lineTo(129,79); g.lineTo(101,51); g.closePath(); g.stroke();
+g.strokeStyle = "#e8c53a"; g.beginPath(); g.rect(27,105,48,48); g.stroke();
+g.strokeStyle = "#3a7de0"; g.beginPath(); g.moveTo(129,101); g.lineTo(155,153); g.lineTo(103,153); g.closePath(); g.stroke();
+</script></body></html>
