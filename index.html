@@ -233,7 +233,7 @@ function sweepMisses(now) {
 }
 
 /* ---------------- rendering ---------------- */
-const HIT_Y = H - 46, HOR_Y = 78, W_NEAR = 400, W_FAR = 90, CX = W/2;
+const HIT_Y = H - 46, HOR_Y = 78, W_NEAR = 330, W_FAR = 80, CX = W * 0.72;
 function proj(v) { const a = 0.6; return (v * (1 + a)) / (v + a); }
 function laneX(lane, v) {
   const p = proj(Math.max(v, 0));
@@ -353,6 +353,30 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
+/* layout preview for ?stageview: one static highway frame with sample gems */
+if (location.search.includes("stageview")) {
+  g.fillStyle = "rgba(18,11,14,0.82)";
+  g.beginPath();
+  g.moveTo(edgeX(0,0), vy(0)); g.lineTo(edgeX(1,0), vy(0));
+  g.lineTo(edgeX(1,1), vy(1)); g.lineTo(edgeX(0,1), vy(1));
+  g.closePath(); g.fill();
+  g.strokeStyle = "rgba(232,221,201,0.16)"; g.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    g.beginPath(); g.moveTo(edgeX(i/4,0), vy(0)); g.lineTo(edgeX(i/4,1), vy(1)); g.stroke();
+  }
+  g.textAlign = "center";
+  for (let l = 0; l < 4; l++) {
+    g.lineWidth = 2.5; g.strokeStyle = LANE_COLORS[l]; g.globalAlpha = 0.65;
+    g.beginPath(); g.ellipse(laneX(l,0), vy(0), 20, 9, 0, 0, Math.PI*2); g.stroke();
+    g.globalAlpha = 1;
+  }
+  for (const [l, v] of [[0,0.15],[2,0.3],[1,0.5],[3,0.62],[2,0.8],[0,0.92]]) {
+    const x = laneX(l, v), y = vy(v), p = 1 - proj(v);
+    g.fillStyle = LANE_COLORS[l];
+    g.beginPath(); g.ellipse(x, y, 8+12*p, 4+6*p, 0, 0, Math.PI*2); g.fill();
+  }
+}
+
 /* ---------------- calibration ---------------- */
 let calActive = false, calClicks = [], calTaps = [];
 function startCal() {
@@ -465,8 +489,9 @@ scene.background = new THREE.Color(0x0a0708);
 scene.fog = new THREE.Fog(0x0a0708, 6, 12);
 
 const camera = new THREE.PerspectiveCamera(38, 640/360, 0.1, 40);
-camera.position.set(0, 1.55, 3.15);
-camera.lookAt(0, 1.02, 0);
+// pan right so the performer stands in the left third, clear of the highway
+camera.position.set(0.68, 1.55, 3.15);
+camera.lookAt(0.68, 1.02, 0);
 
 // warm pub lighting
 scene.add(new THREE.AmbientLight(0x51403a, 1.1));
