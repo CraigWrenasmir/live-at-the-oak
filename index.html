@@ -184,6 +184,12 @@ const WINDOWS = { perfect: 0.045, great: 0.090, ok: 0.130 };  // seconds
 const POINTS = { perfect: 100, great: 60, ok: 30 };
 const LOOKAHEAD = 1.6;      // seconds of highway visible
 const LEAD_IN = 2.2;        // silence before the song starts
+// Global audio delay vs the note clock. Craig measured ~0.15s by frame-
+// aligning capture video: audio ran ahead of the tiles. Tune via ?ao=0.12
+const AUDIO_OFFSET = (() => {
+  const v = parseFloat(new URLSearchParams(location.search).get("ao"));
+  return isNaN(v) ? 0.15 : v;
+})();
 
 // internal PSX-ish resolution, upscaled. Landscape keeps the original
 // composition exactly; portrait (phones upright) restacks: stage on top,
@@ -304,7 +310,7 @@ function startPlay() {
   source.buffer = songBuffer;
   source.connect(ctx.destination);
   const t0 = ctx.currentTime + 0.1;
-  source.start(t0 + LEAD_IN);
+  source.start(t0 + LEAD_IN + AUDIO_OFFSET);
   startAt = t0 + LEAD_IN;
   // ?sync — timing diagnostic: click on every chart beat, scheduled on the
   // same audio clock as the tiles. Clicks on the song's beat = charts true.
