@@ -676,6 +676,19 @@ function frame() {
     g.globalAlpha = 1;
   }
 
+  // 80+ combo: the room lights catch fire — screen-edge glow breathing on
+  // the beat, colour rotating through the lanes each beat
+  if (combo >= 80) {
+    const gl = g.createRadialGradient(W/2, H/2, Math.min(W, H) * 0.34,
+                                      W/2, H/2, Math.max(W, H) * 0.72);
+    gl.addColorStop(0, "rgba(0,0,0,0)");
+    gl.addColorStop(1, LANE_COLORS[beatIdx % 4]);
+    g.globalAlpha = 0.10 + 0.22 * beatPulse;
+    g.fillStyle = gl;
+    g.fillRect(0, 0, W, H);
+    g.globalAlpha = 1;
+  }
+
   // now-playing chyron: slides in over the first seconds, then leaves the
   // stage clean. Bottom-left in landscape; under the score HUD in portrait.
   const clock = now + LEAD_IN;                  // seconds since pressing play
@@ -829,6 +842,28 @@ function pointerEnd(e) {
 cv.addEventListener("pointerup", pointerEnd);
 cv.addEventListener("pointercancel", pointerEnd);
 document.getElementById("scrCal").addEventListener("pointerdown", () => calTap());
+
+/* ---------------- UI click blips ---------------- */
+function uiClick(primary) {
+  try {
+    const ctx = audioCtx();
+    const t = ctx.currentTime;
+    const beep = (f, at) => {
+      const o = ctx.createOscillator(), gn = ctx.createGain();
+      o.type = "square"; o.frequency.value = f;
+      gn.gain.setValueAtTime(0.10, at);
+      gn.gain.exponentialRampToValueAtTime(0.001, at + 0.05);
+      o.connect(gn); gn.connect(ctx.destination);
+      o.start(at); o.stop(at + 0.06);
+    };
+    beep(primary ? 784 : 587, t);
+    if (primary) beep(1175, t + 0.045);
+  } catch (e) {}
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("button, a.bandcamp");
+  if (b) uiClick(b.classList.contains("primary"));
+});
 
 /* ---------------- menu wiring ---------------- */
 $("btnStd").onclick = () => { difficulty = "standard"; $("btnStd").classList.add("active"); $("btnHard").classList.remove("active"); };
