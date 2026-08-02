@@ -86,8 +86,15 @@ def main():
     events = []   # (t, lane, priority)
     for t in kick_t:
         events.append((snap(t), 0, 3))
-    for i, t in enumerate(snare_t):
-        events.append((snap(t), 1 + i % 2, 2))
+    # accented snares (top quartile) take the blue lane; the rest alternate 1/2
+    snare_accent = np.percentile(snare_s, 75) if len(snare_s) else 0
+    alt = 0
+    for t, s in zip(snare_t, snare_s):
+        if s >= snare_accent:
+            events.append((snap(t), 3, 2))
+        else:
+            events.append((snap(t), 1 + alt % 2, 2))
+            alt += 1
     for t in hat_t:
         events.append((snap(t), 3, 1))
     events.sort(key=lambda e: (e[0], -e[2]))
@@ -132,11 +139,16 @@ def main():
             if m.any():
                 reg = float((chroma[:, m].mean(axis=1) * np.arange(12)).sum()
                             / max(chroma[:, m].mean(axis=1).sum(), 1e-6))
-                lane = int(np.clip(reg / 3.0, 0, 3))
             else:
-                lane = 1
-            holds.append({"t": round(t0, 3), "lane": lane, "len": round(ln, 3)})
+                reg = 5.5
+            holds.append({"t": round(t0, 3), "lane": reg, "len": round(ln, 3)})
             t0 += ln + beat_len            # a beat of air between holds
+    # spread hold lanes across all four by quantile rank of register
+    if holds:
+        regs = np.array([h["lane"] for h in holds], dtype=float)
+        order = regs.argsort().argsort()          # rank of each hold's register
+        for h, r in zip(holds, order):
+            h["lane"] = int(r * LANES / len(holds))
     notes += holds
     notes.sort(key=lambda n: n["t"])
 
