@@ -328,7 +328,7 @@ if (DEMO && DEMO_REC) {
       const chunks = [];
       mr.rec.ondataavailable = e => chunks.push(e.data);
       mr.rec.onstop = async () => {
-        await fetch("http://localhost:8042/save?name=" + DEMO + ".webm",
+        await fetch("http://localhost:8042/save?name=" + DEMO + (QP.get("tag") || "") + ".webm",
                     { method: "PUT", body: new Blob(chunks, { type: "video/webm" }) });
         console.log("[demo] recording uploaded");
         document.title = "REC-DONE";
