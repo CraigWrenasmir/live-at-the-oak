@@ -22,7 +22,7 @@
       radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%); }
   .screen { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
     align-items:center; justify-content:center; gap:18px; padding:24px; text-align:center;
-    background:radial-gradient(ellipse at 50% 30%, rgba(36,20,23,.88) 0%, rgba(10,7,8,.92) 70%); }
+    background:radial-gradient(ellipse at 50% 30%, rgba(36,20,23,.42) 0%, rgba(10,7,8,.78) 70%); }
   .hidden { display:none !important; }
   h1 { font-size:clamp(20px,4.5vw,40px); letter-spacing:2px; text-transform:uppercase;
     color:#7ee787; text-shadow: 2px 0 rgba(224,74,58,.8), -2px 0 rgba(58,125,224,.8), 0 0 18px rgba(126,231,135,.35);
@@ -445,7 +445,17 @@ import { GLTFLoader } from "./assets/vendor/GLTFLoader.js";
 
 const LANE_RGB = [0x3ec54b, 0xe04a3a, 0xe8c53a, 0x3a7de0];
 const bgcv = document.getElementById("bg3d");
-const renderer = new THREE.WebGLRenderer({ canvas: bgcv, antialias: false });
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas: bgcv, antialias: false });
+} catch (err) {
+  console.error("[Oak3D] no WebGL, 2D fallback stays on", err);
+  throw err;
+}
+// dev aid: ?stageview hides the menus so the bare stage is visible
+if (location.search.includes("stageview")) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.add("hidden"));
+}
 renderer.setPixelRatio(1);
 renderer.setSize(640, 360, false);        // PSX res; CSS upscales pixelated
 renderer.outputColorSpace = THREE.SRGBColorSpace;
