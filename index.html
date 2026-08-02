@@ -122,10 +122,23 @@ const POINTS = { perfect: 100, great: 60, ok: 30 };
 const LOOKAHEAD = 1.6;      // seconds of highway visible
 const LEAD_IN = 2.2;        // silence before the song starts
 
-const W = 640, H = 360;     // internal PSX-ish resolution, upscaled
+// internal PSX-ish resolution, upscaled. Landscape keeps the original
+// composition exactly; portrait (phones upright) restacks: stage on top,
+// full-width highway below with thumb-scale tap zones.
+let W = 640, H = 360;
+let HIT_Y, HOR_Y, W_NEAR, W_FAR, CX;
 const cv = document.getElementById("cv");
-cv.width = W; cv.height = H;
 const g = cv.getContext("2d");
+function applyLayout() {
+  const portrait = innerHeight > innerWidth;
+  W = portrait ? 360 : 640;
+  H = portrait ? 640 : 360;
+  cv.width = W; cv.height = H;
+  if (portrait) { HIT_Y = H - 72; HOR_Y = H * 0.40; W_NEAR = 330; W_FAR = 70; CX = W / 2; }
+  else          { HIT_Y = H - 46; HOR_Y = 78;       W_NEAR = 330; W_FAR = 80; CX = W * 0.72; }
+}
+applyLayout();
+window.addEventListener("resize", applyLayout);
 
 let ac = null;              // AudioContext, created on first gesture
 let songBuffer = null, chart = null, source = null;
@@ -286,7 +299,6 @@ function processHolds(now) {
 }
 
 /* ---------------- rendering ---------------- */
-const HIT_Y = H - 46, HOR_Y = 78, W_NEAR = 330, W_FAR = 80, CX = W * 0.72;
 function proj(v) { const a = 0.6; return (v * (1 + a)) / (v + a); }
 function laneX(lane, v) {
   const p = proj(Math.max(v, 0));
@@ -432,7 +444,8 @@ function frame() {
 }
 
 /* layout preview for ?stageview: one static highway frame with sample gems */
-if (location.search.includes("stageview")) {
+function drawPreview() {
+  g.clearRect(0, 0, W, H);
   g.fillStyle = "rgba(18,11,14,0.82)";
   g.beginPath();
   g.moveTo(edgeX(0,0), vy(0)); g.lineTo(edgeX(1,0), vy(0));
@@ -453,6 +466,10 @@ if (location.search.includes("stageview")) {
     g.fillStyle = LANE_COLORS[l];
     g.beginPath(); g.ellipse(x, y, 8+12*p, 4+6*p, 0, 0, Math.PI*2); g.fill();
   }
+}
+if (location.search.includes("stageview")) {
+  drawPreview();
+  window.addEventListener("resize", () => requestAnimationFrame(drawPreview));
 }
 
 /* ---------------- calibration ---------------- */
@@ -572,7 +589,6 @@ if (location.search.includes("stageview")) {
   document.querySelectorAll(".screen").forEach(s => s.classList.add("hidden"));
 }
 renderer.setPixelRatio(1);
-renderer.setSize(640, 360, false);        // PSX res; CSS upscales pixelated
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
@@ -580,9 +596,24 @@ scene.background = new THREE.Color(0x0a0708);
 scene.fog = new THREE.Fog(0x0a0708, 6, 12);
 
 const camera = new THREE.PerspectiveCamera(38, 640/360, 0.1, 40);
-// pan right so the performer stands in the left third, clear of the highway
-camera.position.set(0.68, 1.55, 3.15);
-camera.lookAt(0.68, 1.02, 0);
+function fit() {
+  const portrait = innerHeight > innerWidth;
+  const w = portrait ? 360 : 640, h = portrait ? 640 : 360;
+  renderer.setSize(w, h, false);        // PSX res; CSS upscales pixelated
+  camera.aspect = w / h;
+  if (portrait) {
+    // head and chest clear above the highway horizon (top ~40% of frame)
+    camera.position.set(0, 1.35, 3.5);
+    camera.lookAt(0, 1.25, 0);
+  } else {
+    // pan right so the performer stands in the left third, clear of the highway
+    camera.position.set(0.68, 1.55, 3.15);
+    camera.lookAt(0.68, 1.02, 0);
+  }
+  camera.updateProjectionMatrix();
+}
+fit();
+window.addEventListener("resize", fit);
 
 // warm pub lighting
 scene.add(new THREE.AmbientLight(0x51403a, 1.1));
