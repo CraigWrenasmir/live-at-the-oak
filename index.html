@@ -609,15 +609,22 @@ function frame() {
   // now-playing chyron: slides in over the first seconds, then leaves the
   // stage clean. Bottom-left in landscape; under the score HUD in portrait.
   const clock = now + LEAD_IN;                  // seconds since pressing play
-  const chyA = Math.max(0, Math.min(1, clock / 0.5, (7.5 - clock) / 0.8));
+  const introA = Math.max(0, Math.min(1, clock / 0.5, (7.5 - clock) / 0.8));
+  // farewell: the name flickers back up over the last bars
+  const oc = now - (chart.duration - 8);
+  const outroA = Math.max(0, Math.min(1, oc / 0.5, (chart.duration - 0.8 - now) / 0.8));
+  const chyA = Math.max(introA, outroA);
   if (chyA > 0 && nowPlaying) {
     const portrait = H > W;
-    const slide = (1 - Math.min(1, clock / 0.5)) * 18;
+    const phase = outroA > introA ? oc : clock;
+    const label = outroA > introA ? "WRENASMIR · LIVE AT THE OAK"
+                                  : "NOW PLAYING · " + nowPlayingDiff;
+    const slide = (1 - Math.min(1, phase / 0.5)) * 18;
     const px = 12 - slide, py = portrait ? 74 : H - 22;
     g.globalAlpha = chyA;
     g.textAlign = "left";
     g.font = "9px monospace"; g.fillStyle = "#8a7a63";
-    g.fillText("NOW PLAYING · " + nowPlayingDiff, px, py - 17);
+    g.fillText(label, px, py - 17);
     g.font = "bold 18px monospace";
     g.fillStyle = "rgba(224,74,58,.8)";  g.fillText(nowPlaying, px + 1.5, py);
     g.fillStyle = "rgba(58,125,224,.8)"; g.fillText(nowPlaying, px - 1.5, py);
