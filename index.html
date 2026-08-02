@@ -199,6 +199,7 @@ let playing = false, paused = false, difficulty = "standard";
 let latency = parseFloat(localStorage.getItem("oakLatency") || "0");
 
 let notes = [];
+let nowPlaying = "", nowPlayingDiff = "";
 let laneFlash = [0,0,0,0];
 let laneHeld = [false,false,false,false];
 const pointerLanes = new Map();   // pointerId -> lane, for touch holds
@@ -291,6 +292,8 @@ function startPlay() {
   const t0 = ctx.currentTime + 0.1;
   source.start(t0 + LEAD_IN);
   startAt = t0 + LEAD_IN;
+  nowPlaying = SONGS[songIdx].title.toUpperCase();
+  nowPlayingDiff = difficulty.toUpperCase();
   playing = true; paused = false;
   hideAll();
   $("btnPause").classList.remove("hidden");
@@ -600,6 +603,25 @@ function frame() {
     g.fillStyle = jcolors[j.grade];
     g.font = "bold 13px monospace";
     g.fillText(j.text, laneX(j.lane, 0), vy(0) - 34 - age*22);
+    g.globalAlpha = 1;
+  }
+
+  // now-playing chyron: slides in over the first seconds, then leaves the
+  // stage clean. Bottom-left in landscape; under the score HUD in portrait.
+  const clock = now + LEAD_IN;                  // seconds since pressing play
+  const chyA = Math.max(0, Math.min(1, clock / 0.5, (7.5 - clock) / 0.8));
+  if (chyA > 0 && nowPlaying) {
+    const portrait = H > W;
+    const slide = (1 - Math.min(1, clock / 0.5)) * 18;
+    const px = 12 - slide, py = portrait ? 74 : H - 22;
+    g.globalAlpha = chyA;
+    g.textAlign = "left";
+    g.font = "9px monospace"; g.fillStyle = "#8a7a63";
+    g.fillText("NOW PLAYING · " + nowPlayingDiff, px, py - 17);
+    g.font = "bold 18px monospace";
+    g.fillStyle = "rgba(224,74,58,.8)";  g.fillText(nowPlaying, px + 1.5, py);
+    g.fillStyle = "rgba(58,125,224,.8)"; g.fillText(nowPlaying, px - 1.5, py);
+    g.fillStyle = "#7ee787";             g.fillText(nowPlaying, px, py);
     g.globalAlpha = 1;
   }
 
