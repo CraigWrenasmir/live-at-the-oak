@@ -40,6 +40,12 @@
   .row { display:flex; gap:10px; width:100%; }
   .row button { flex:1; }
   .diffsel button.active { border-color:#e8c53a; color:#e8c53a; background:#332a12; }
+  .setlist { display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; }
+  .setlist button { display:flex; justify-content:space-between; gap:10px;
+    padding:9px 12px; font-size:13px; letter-spacing:0.5px; }
+  .setlist button span:last-child { color:#8a7a63; }
+  .setlist button.active { border-color:#7ee787; color:#7ee787; }
+  .setlist button.active span:last-child { color:#7ee787; }
   #hint { font-size:12px; color:#8a7a63; line-height:1.7; }
   #calStatus { font-size:26px; color:#e8c53a; min-height:34px; }
   .big { font-size:clamp(26px,6vw,48px); color:#e8c53a; }
@@ -60,7 +66,8 @@
   <h1>Wrenasmir<br>Live at The Oak</h1>
   <div class="sub">A RETRO RHYTHM SET &mdash; RECORDED LIVE</div>
   <div class="card" style="display:flex;flex-direction:column;gap:12px;">
-    <div class="sub" id="songLabel">01 &mdash; CRAFLUROPI &mdash; 120 BPM</div>
+    <div class="sub">THE SET</div>
+    <div class="setlist" id="setlist"></div>
     <div class="row diffsel">
       <button id="btnStd" class="active">Standard</button>
       <button id="btnHard">Hard</button>
@@ -104,10 +111,8 @@
    desync judgement. The 3D stage (module script below) renders behind
    this canvas and reads song state through window.OakGame.            */
 
-const SONGS = [{
-  label: "01 — CRAFLUROPI — 120 BPM",
-  charts: { standard: "charts/crafluropi.json", hard: "charts/crafluropi-hard.json" }
-}];
+let SONGS = [];      // loaded from charts/setlist.json
+let songIdx = 0;
 
 const LANE_COLORS = ["#3ec54b", "#e04a3a", "#e8c53a", "#3a7de0"];
 const LANE_KEYS = ["KeyD", "KeyF", "KeyJ", "KeyK"];
@@ -149,12 +154,33 @@ function audioCtx() {
 
 async function loadSong(song, diff) {
   const ctx = audioCtx();
-  const [chartRes, audioRes] = await Promise.all([
-    fetch(song.charts[diff]), fetch("audio/Crafluropi.mp3")]);
-  chart = await chartRes.json();
-  const raw = await audioRes.arrayBuffer();
+  chart = await (await fetch(song.charts[diff])).json();
+  const raw = await (await fetch(chart.audio)).arrayBuffer();
   songBuffer = await ctx.decodeAudioData(raw);
 }
+
+async function loadSetlist() {
+  SONGS = await (await fetch("charts/setlist.json")).json();
+  const el = $("setlist");
+  el.innerHTML = "";
+  SONGS.forEach((s, i) => {
+    const b = document.createElement("button");
+    const mins = Math.floor(s.duration / 60);
+    const secs = String(Math.round(s.duration % 60)).padStart(2, "0");
+    b.innerHTML = `<span>${String(s.n).padStart(2,"0")} ${s.title.toUpperCase()}</span>` +
+                  `<span>${mins}:${secs}</span>`;
+    b.onclick = () => {
+      songIdx = i;
+      [...el.children].forEach((c, j) => c.classList.toggle("active", j === i));
+    };
+    if (i === songIdx) b.classList.add("active");
+    el.appendChild(b);
+  });
+}
+loadSetlist().catch(err => {
+  $("setlist").innerHTML = "<div class='sub'>setlist failed to load</div>";
+  console.error(err);
+});
 
 function songTime() { return ac.currentTime - startAt; }
 
@@ -506,7 +532,7 @@ $("btnHard").onclick = () => { difficulty = "hard"; $("btnHard").classList.add("
 $("btnPlay").onclick = async () => {
   $("btnPlay").textContent = "Loading…";
   try {
-    await loadSong(SONGS[0], difficulty);
+    await loadSong(SONGS[songIdx], difficulty);
     startPlay();
   } catch (err) {
     $("btnPlay").textContent = "Load failed — serve over http";
