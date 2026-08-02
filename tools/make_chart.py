@@ -83,6 +83,26 @@ def main():
     hat_t, hat_s = (onsets_of(band(y, sr, lo=4000), sr, max(floor_pct, 30))
                     if hats else (np.array([]), np.array([])))
 
+    # unfloored pools + centroid map, used by the dynamics pass below
+    pool = []     # (t, strength) across all bands, no floor
+    for by, lo, hi in [(band(y, sr, hi=140), None, None),
+                       (band(y, sr, lo=140, hi=2500), None, None),
+                       (band(y, sr, lo=4000), None, None)]:
+        pt, ps = onsets_of(by, sr, 0)
+        pool += list(zip(pt, ps))
+    pool.sort()
+    centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+
+    def centroid_at(t):
+        f = min(int(librosa.time_to_frames(t, sr=sr)), len(centroid) - 1)
+        return centroid[max(f, 0)]
+
+    cent_all = np.array([centroid_at(t) for t, _ in pool]) if pool else np.array([1000.0])
+    lane_bounds = np.percentile(cent_all, [25, 50, 75])
+
+    def lane_of(t):
+        return int(np.searchsorted(lane_bounds, centroid_at(t)))
+
     events = []   # (t, lane, priority)
     for t in kick_t:
         events.append((snap(t), 0, 3))
@@ -112,9 +132,62 @@ def main():
         last_by_lane[lane] = t
         last_any = t
 
-    # ---- holds over the quiet stretches, through to the end ----
+    # ---- dynamics pass 1: fill sections that are loud but under-charted ----
     rms = librosa.feature.rms(y=y)[0]
     rms_t = librosa.times_like(rms, sr=sr)
+    bin_w = 2.0
+    n_bins = int(duration / bin_w) + 1
+    dens = np.zeros(n_bins)
+    for n in notes:
+        dens[int(n["t"] / bin_w)] += 1
+    rms_bin = np.array([
+        rms[(rms_t >= i * bin_w) & (rms_t < (i + 1) * bin_w)].mean()
+        if ((rms_t >= i * bin_w) & (rms_t < (i + 1) * bin_w)).any() else 0
+        for i in range(n_bins)])
+    live = dens[dens > 0]
+    med_d = np.median(live) if len(live) else 0
+    med_r = np.median(rms_bin[rms_bin > 0]) if (rms_bin > 0).any() else 0
+    filled = 0
+    if med_d > 0:
+        taps_t = np.array(sorted(n["t"] for n in notes))
+        for i in range(n_bins):
+            if dens[i] >= 0.45 * med_d or rms_bin[i] < 0.75 * med_r:
+                continue
+            want = int(0.8 * med_d - dens[i])
+            cands = [(s, t) for t, s in pool if i * bin_w <= t < (i + 1) * bin_w]
+            cands.sort(reverse=True)
+            for s, t in cands:
+                if want <= 0:
+                    break
+                ts = snap(t)
+                if len(taps_t) and np.abs(taps_t - ts).min() < min_gap * 0.8:
+                    continue
+                notes.append({"t": round(ts, 3), "lane": lane_of(t)})
+                taps_t = np.append(taps_t, ts)
+                want -= 1
+                filled += 1
+    notes.sort(key=lambda n: n["t"])
+
+    # ---- dynamics pass 2: break monotone same-lane runs ----
+    broken = 0
+    run = []
+    for n in notes + [{"t": -1, "lane": -1}]:          # sentinel flushes last run
+        if run and n["lane"] == run[-1]["lane"] and n["t"] != run[-1]["t"]:
+            run.append(n)
+            continue
+        if len(run) >= 5:
+            base = run[0]["lane"]
+            for j, m in enumerate(run):
+                if j % 2 == 0:
+                    continue
+                alt = lane_of(m["t"])
+                if alt == base:
+                    alt = (base + (1, 3, 2)[(j // 2) % 3]) % LANES
+                m["lane"] = alt
+                broken += 1
+        run = [n] if n["lane"] >= 0 else []
+
+    # ---- holds over the quiet stretches, through to the end ----
     rms_floor = np.percentile(rms, RMS_FLOOR_PCT)
     chroma = librosa.feature.chroma_stft(y=y, sr=sr)
     chroma_t = librosa.times_like(chroma[0], sr=sr)
@@ -166,7 +239,8 @@ def main():
     out_path.write_text(json.dumps(chart, indent=1))
     taps = len(notes) - len(holds)
     print(f"{audio_path.name}: {tempo:.1f} BPM, {taps} taps + {len(holds)} holds "
-          f"over {duration:.0f}s (kick {len(kick_t)}, snare {len(snare_t)}, hat {len(hat_t)})")
+          f"over {duration:.0f}s (kick {len(kick_t)}, snare {len(snare_t)}, hat {len(hat_t)}; "
+          f"dynamics: +{filled} filled, {broken} run-breaks)")
 
 
 if __name__ == "__main__":

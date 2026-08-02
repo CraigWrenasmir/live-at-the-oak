@@ -1,30 +1,30 @@
 {
  "crafluropi": {
-  "hard": 500478,
-  "standard": 189848
+  "hard": 509278,
+  "standard": 192598
  },
  "lucempight": {
-  "hard": 482533,
-  "standard": 183030
+  "hard": 484533,
+  "standard": 188344
  },
  "mabon": {
-  "hard": 730300,
-  "standard": 265100
+  "hard": 733100,
+  "standard": 267500
  },
  "rdst-gm": {
-  "hard": 498300,
-  "standard": 217798
+  "hard": 505900,
+  "standard": 220198
  },
  "spinet-destroiet": {
-  "hard": 394373,
-  "standard": 181519
+  "hard": 402601,
+  "standard": 185016
  },
  "the-way-that-i-go": {
-  "hard": 879799,
-  "standard": 300578
+  "hard": 887399,
+  "standard": 302199
  },
  "what-is-better": {
-  "hard": 635100,
-  "standard": 239900
+  "hard": 642700,
+  "standard": 242300
  }
 }

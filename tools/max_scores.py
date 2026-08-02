@@ -8,7 +8,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 out = {}
 for f in sorted((root / "charts").glob("*.json")):
-    if f.name == "setlist.json":
+    if f.name in ("setlist.json", "max_scores.json"):
         continue
     c = json.loads(f.read_text())
     combo = score = 0
