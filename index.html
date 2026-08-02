@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Wrenasmir — Live at The Oak</title>
 <meta name="description" content="The playable gig: play along with all seven songs from Wrenasmir's Live at The Oak in a retro rhythm game. Post your score, chase the leaderboard.">
@@ -61,8 +61,11 @@
   .judgeCounts { display:grid; grid-template-columns:auto auto; gap:4px 22px; font-size:15px; text-align:left; }
   .judgeCounts b { text-align:right; }
   kbd { border:1px solid #6a4046; padding:1px 7px; margin:0 2px; background:#1a0f11; }
-  #btnPause { position:fixed; top:10px; right:10px; z-index:30; width:auto;
+  #btnPause { position:fixed; top:calc(10px + env(safe-area-inset-top, 0px));
+    right:calc(10px + env(safe-area-inset-right, 0px)); z-index:30; width:auto;
     padding:8px 13px; font-size:14px; background:rgba(26,15,17,.7); }
+  .screen { padding-top:calc(24px + env(safe-area-inset-top, 0px));
+    padding-bottom:calc(24px + env(safe-area-inset-bottom, 0px)); }
   a.bandcamp { color:#7ee787; text-decoration:none; font-size:12px; letter-spacing:1px; }
   a.bandcamp:hover { color:#fff; text-decoration:underline; }
   .board { list-style:none; width:100%; text-align:left; font-size:13px;
@@ -464,6 +467,11 @@ async function loadBoard(el, song, diff, highlightId) {
   }
 }
 
+// in the native app, speak touch — no keyboard exists
+if (window.OakNative) {
+  $("hint").innerHTML = "Tap the four lanes to hit the gems.<br>Hold your finger down for long notes.";
+}
+
 $("lbInitials").value = localStorage.getItem("oakInitials") || "";
 $("lbInitials").addEventListener("input", e => {
   e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, "");
@@ -524,6 +532,9 @@ function pressLane(lane) {
   judgements.push({ text: grade.toUpperCase(), grade, t: songTime(), lane });
   if (grade === "perfect") fx.echoes.push({ lane, t0: songTime(), s: 1 });
   else if (grade === "great") fx.echoes.push({ lane, t0: songTime(), s: 0.5 });
+  if (window.OakNative) {
+    window.OakNative.haptic(combo > 0 && combo % 20 === 0 ? "combo" : grade);
+  }
   window.OakGame.hits.push({ lane, grade });
 }
 
@@ -543,6 +554,7 @@ function finishHold(n, now) {
   const pts = Math.round(held * 100);
   score += pts;
   n.state = "done";
+  if (held >= n.len - 0.1 && window.OakNative) window.OakNative.haptic("held");
   judgements.push({ text: held >= n.len - 0.1 ? "HELD +" + pts : "+" + pts,
                     grade: held >= n.len - 0.1 ? "perfect" : "ok",
                     t: songTime(), lane: n.lane });
@@ -959,7 +971,10 @@ function uiClick(primary) {
 }
 document.addEventListener("click", e => {
   const b = e.target.closest("button, a.bandcamp");
-  if (b) uiClick(b.classList.contains("primary"));
+  if (b) {
+    uiClick(b.classList.contains("primary"));
+    if (window.OakNative) window.OakNative.haptic("ui");
+  }
 });
 
 /* ---------------- menu wiring ---------------- */
