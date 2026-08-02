@@ -21,13 +21,13 @@ once per device — the offset is stored in localStorage.
   so dropped frames can never desync judgement. Internal render is 640×360
   upscaled with `image-rendering: pixelated` for the PSX look.
 - `charts/*.json` — note charts: `{bpm, beatOffset, duration, lanes, notes:[{t, lane}]}`.
-- `tools/make_chart.py` — first-pass chart generator (librosa): beat-tracks the
-  song, detects onsets, snaps to a 16th-note grid, assigns lanes by spectral
-  centroid quantiles (bassy → left, bright → right). Charts are meant to be
-  hand-tuned in the chart editor (next up).
+- `tools/make_chart.py` — chart generator v2 (librosa + scipy): band-split
+  onsets — kick (<140Hz) → lane 0, snare (140–2500Hz) → lanes 1/2, hats
+  (>4kHz) → lane 3 — snapped to a 16th grid; quiet stretches with energy
+  become chains of hold notes (`len` in seconds) through to the end of song.
   ```sh
-  .venv/bin/python tools/make_chart.py audio/Song.mp3 charts/song.json [min_gap] [strength_floor_pct]
-  # standard: min_gap 0.22, floor 45 — hard: min_gap 0.11, floor 0
+  .venv/bin/python tools/make_chart.py audio/Song.mp3 charts/song.json [min_gap] [floor_pct] [--no-hats]
+  # standard: 0.26 55 --no-hats — hard: 0.14 30
   ```
 
 ## Roadmap
