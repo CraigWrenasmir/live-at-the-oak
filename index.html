@@ -16,7 +16,10 @@
 <link rel="apple-touch-icon" href="promo/apple-touch-icon.png">
 <style>
   :root { --green:#3ec54b; --red:#e04a3a; --yellow:#e8c53a; --blue:#3a7de0; }
-  * { margin:0; padding:0; box-sizing:border-box; }
+  * { margin:0; padding:0; box-sizing:border-box;
+    -webkit-touch-callout:none; -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent; }
+  #lbInitials { -webkit-user-select:text; user-select:text; }
   html,body { height:100%; background:#0a0708; overflow:hidden; touch-action:none;
     font-family:"Courier New", ui-monospace, monospace; color:#e8ddc9; }
   #stage { position:fixed; inset:0; }
@@ -229,6 +232,10 @@ function applyLayout() {
 }
 applyLayout();
 window.addEventListener("resize", applyLayout);
+window.addEventListener("orientationchange", () => setTimeout(applyLayout, 60));
+// WKWebView settles its viewport a beat after load — re-measure to be sure
+setTimeout(applyLayout, 400);
+setTimeout(applyLayout, 1200);
 
 let ac = null;              // AudioContext, created on first gesture
 let songBuffer = null, chart = null, source = null;
@@ -725,8 +732,10 @@ function frame() {
     if (lit) { g.globalAlpha = 0.35; g.fillStyle = LANE_COLORS[l];
       gemPath(l, x, y, 20, 9); g.fill(); }
     g.globalAlpha = 1;
-    g.fillStyle = "rgba(232,221,201,.5)"; g.font = "9px monospace";
-    g.fillText(KEY_LABELS[l], x, y + 26);
+    if (!window.OakNative) {           // desktop key labels mean nothing on touch
+      g.fillStyle = "rgba(232,221,201,.5)"; g.font = "9px monospace";
+      g.fillText(KEY_LABELS[l], x, y + 26);
+    }
   }
 
   // perfect-hit echoes: the lane's shape rings outward from the receptor
@@ -1056,8 +1065,10 @@ function fit() {
   renderer.setSize(w, h, false);        // PSX res; CSS upscales pixelated
   camera.aspect = w / h;
   if (h > w) {
-    // head and chest clear above the highway horizon (top ~40% of frame)
-    camera.position.set(0, 1.35, 3.5);
+    // head and chest clear above the highway horizon; taller screens pull
+    // the camera back so the performer never outgrows the frame
+    const dist = 3.5 + Math.max(0, (h - 640)) * 0.005;
+    camera.position.set(0, 1.35, dist);
     camera.lookAt(0, 1.25, 0);
   } else {
     // pan right so the performer stands in the left third; scale the pan
@@ -1070,6 +1081,9 @@ function fit() {
 }
 fit();
 window.addEventListener("resize", fit);
+window.addEventListener("orientationchange", () => setTimeout(fit, 120));
+setTimeout(fit, 500);      // after the classic script's late re-measures
+setTimeout(fit, 1300);
 
 // warm pub lighting
 scene.add(new THREE.AmbientLight(0x51403a, 1.1));
