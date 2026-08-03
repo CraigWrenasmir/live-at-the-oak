@@ -16,8 +16,10 @@ os.chdir(ROOT)
 
 class H(SimpleHTTPRequestHandler):
     def do_PUT(self):
-        name = os.path.basename(self.path.split("?")[0])
-        if not (self.path.startswith("/charts/") and name.endswith(".json")):
+        path = self.path.split("?")[0]
+        name = os.path.basename(path)
+        draft = path.startswith("/charts/drafts/")
+        if not ((draft or path.startswith("/charts/")) and name.endswith(".json")):
             self.send_error(403)
             return
         n = int(self.headers.get("Content-Length", 0))
@@ -27,11 +29,13 @@ class H(SimpleHTTPRequestHandler):
         except ValueError:
             self.send_error(400, "invalid JSON")
             return
-        with open(os.path.join(ROOT, "charts", name), "wb") as f:
+        sub = os.path.join("charts", "drafts") if draft else "charts"
+        os.makedirs(os.path.join(ROOT, sub), exist_ok=True)
+        with open(os.path.join(ROOT, sub, name), "wb") as f:
             f.write(body)
         self.send_response(200)
         self.end_headers()
-        print("saved", name, n, "bytes", flush=True)
+        print("saved", os.path.join(sub, name), n, "bytes", flush=True)
 
     def log_message(self, *a):
         pass

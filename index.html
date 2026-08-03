@@ -238,6 +238,7 @@ setTimeout(applyLayout, 400);
 setTimeout(applyLayout, 1200);
 
 let ac = null;              // AudioContext, created on first gesture
+let usingDraft = false;
 let songBuffer = null, chart = null, source = null;
 let startAt = 0;
 let playing = false, paused = false, difficulty = "standard";
@@ -283,7 +284,16 @@ function oakDest() { return audioSink || ac.destination; }
 
 async function loadSong(song, diff, onProgress) {
   const ctx = audioCtx();
-  chart = await (await fetch(song.charts[diff])).json();
+  // ?draft — playtest edited charts from charts/drafts/ without touching
+  // the real ones; falls back to the base chart when no draft exists
+  let chartPath = song.charts[diff];
+  if (QP.has("draft")) {
+    const draftPath = chartPath.replace("charts/", "charts/drafts/");
+    const dr = await fetch(draftPath + "?t=" + Date.now()).catch(() => null);
+    if (dr && dr.ok) { chart = await dr.json(); chartPath = null; }
+  }
+  usingDraft = !chartPath;
+  if (chartPath) chart = await (await fetch(chartPath)).json();
   if (window.OakNative && window.OakNative.song) {
     window.OakNative.song({ cmd: "load", slug: song.slug });
     songBuffer = null;               // music lives on the native side
@@ -888,6 +898,10 @@ function frame() {
   g.fillStyle = "#e8c53a";
   g.fillRect(px0, 8, (px1 - px0) * Math.max(0, Math.min(1, now / chart.duration)), 3);
 
+  if (usingDraft) {
+    g.textAlign = "center"; g.font = "bold 10px monospace";
+    g.fillStyle = "#e8c53a"; g.fillText("· DRAFT CHART ·", CX, 20);
+  }
   g.textAlign = "left"; g.font = "bold 16px monospace";
   g.fillStyle = "#e8ddc9"; g.fillText(score.toLocaleString(), 12, 24);
   const mult = 1 + Math.min(3, Math.floor(combo / 10));

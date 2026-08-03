@@ -33,7 +33,8 @@
   <button id="btnMetro">Metronome</button>
   <button id="btnZoomOut">&minus;</button>
   <button id="btnZoomIn">+</button>
-  <button id="btnSave" class="primary">Save</button>
+  <button id="btnSave" class="primary">Save draft</button>
+  <button id="btnPromote">Promote &rarr; game</button>
   <span id="status">no chart loaded</span>
 </div>
 <div id="wrap"><canvas id="cv"></canvas></div>
@@ -52,7 +53,7 @@ const cv = document.getElementById("cv");
 const g = cv.getContext("2d");
 const $ = id => document.getElementById(id);
 
-let ac = null, buffer = null, chart = null, chartFile = null;
+let ac = null, buffer = null, chart = null, chartFile = null, draftFile = null;
 let peaks = null;                 // waveform min/max per column at current zoom
 let pxPerSec = 120, scrollT = 0;  // seconds at left edge
 let cursor = 0;                   // seek position (seconds)
@@ -80,15 +81,20 @@ loadSetlist();
 async function load() {
   const slug = $("selSong").value, diff = $("selDiff").value;
   chartFile = "charts/" + slug + (diff === "hard" ? "-hard" : "") + ".json";
+  draftFile = "charts/drafts/" + slug + (diff === "hard" ? "-hard" : "") + ".json";
   setStatus("loading…");
-  chart = await (await fetch(chartFile + "?t=" + Math.random())).json();
+  let src = chartFile, isDraft = false;
+  const dr = await fetch(draftFile + "?t=" + Math.random());
+  if (dr.ok) { src = null; chart = await dr.json(); isDraft = true; }
+  else chart = await (await fetch(chartFile + "?t=" + Math.random())).json();
   chart.notes.sort((a, b) => a.t - b.t);
   if (!ac) ac = new AudioContext();
   const raw = await (await fetch(chart.audio)).arrayBuffer();
   buffer = await ac.decodeAudioData(raw);
   peaks = null; history = []; future = []; selected.clear();
   cursor = 0; scrollT = 0; dirty = false;
-  setStatus(chartFile + " — " + chart.notes.length + " notes");
+  setStatus((isDraft ? "[DRAFT] " : "") + chartFile.replace("charts/", "") +
+            " — " + chart.notes.length + " notes", isDraft ? "dirty" : "");
   draw();
 }
 $("btnLoad").onclick = load;
@@ -416,14 +422,21 @@ $("btnZoomIn").onclick = () => { pxPerSec = Math.min(500, pxPerSec * 1.3); peaks
 $("btnZoomOut").onclick = () => { pxPerSec = Math.max(20, pxPerSec / 1.3); peaks = null; };
 
 async function save() {
-  if (!chart || !chartFile) return;
+  if (!chart || !draftFile) return;
   chart.notes.sort((a, b) => a.t - b.t);
-  setStatus("saving…");
-  const r = await fetch(chartFile, { method: "PUT", body: JSON.stringify(chart, null, 1) });
-  if (r.ok) { dirty = false; setStatus("saved " + chartFile, "saved"); }
+  setStatus("saving draft…");
+  const r = await fetch(draftFile, { method: "PUT", body: JSON.stringify(chart, null, 1) });
+  if (r.ok) { dirty = false; setStatus("draft saved — playtest at /?draft", "saved"); }
   else setStatus("SAVE FAILED " + r.status, "dirty");
 }
 $("btnSave").onclick = save;
+$("btnPromote").onclick = async () => {
+  if (!chart || !chartFile) return;
+  if (!confirm("Overwrite the real chart with this draft?\n" + chartFile)) return;
+  chart.notes.sort((a, b) => a.t - b.t);
+  const r = await fetch(chartFile, { method: "PUT", body: JSON.stringify(chart, null, 1) });
+  setStatus(r.ok ? "PROMOTED to " + chartFile : "PROMOTE FAILED", r.ok ? "saved" : "dirty");
+};
 window.addEventListener("beforeunload", e => { if (dirty) e.preventDefault(); });
 </script>
 </body>

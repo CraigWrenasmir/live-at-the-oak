@@ -4,3 +4,4 @@ __pycache__/
 audio/*.wav
 .DS_Store
 promo/recordings/
+charts/drafts/
