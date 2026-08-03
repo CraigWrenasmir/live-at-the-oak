@@ -276,8 +276,15 @@ function audioCtx() {
     }
   }
   if (ac.state === "suspended") ac.resume();
-  if (audioSinkEl) audioSinkEl.play().catch(() => {});
+  sinkPlay();
   return ac;
+}
+let audioSinkStarted = false;
+function sinkPlay() {
+  if (!audioSinkEl) return;
+  if (audioSinkStarted && !audioSinkEl.paused) return;   // never restart a live sink
+  audioSinkStarted = true;
+  audioSinkEl.play().catch(() => { audioSinkStarted = false; });
 }
 function oakDest() { return audioSink || ac.destination; }
 
@@ -430,6 +437,7 @@ function startPlay() {
 function pauseGame() {
   if (!playing || paused) return;
   paused = true;
+  if (audioSinkEl) audioSinkEl.pause();    // starve-proof: sink sleeps too,
   ac.suspend();                      // freezes the audio clock: notes, music,
   $("btnPause").classList.add("hidden");   // sway all halt in sync
   show("pause");
@@ -439,6 +447,7 @@ function resumeGame() {
   if (!paused) return;
   paused = false;
   ac.resume();
+  sinkPlay();
   hideAll();
   $("btnPause").classList.remove("hidden");
   requestAnimationFrame(frame);
@@ -448,6 +457,7 @@ function endPlay(showResults = true) {
   playing = false; paused = false;
   $("btnPause").classList.add("hidden");
   if (ac && ac.state === "suspended") ac.resume();
+  sinkPlay();
   try { source && source.stop(); } catch(e) {}
   if (!showResults) { show("title"); return; }
   const total = counts.perfect + counts.great + counts.ok + counts.miss;
