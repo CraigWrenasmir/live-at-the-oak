@@ -263,17 +263,10 @@ let audioSink = null, audioSinkEl = null;
 function audioCtx() {
   if (!ac) {
     ac = new (window.AudioContext || window.webkitAudioContext)();
-    // iOS treats raw WebAudio as "ambient" (muted by the silent switch) but
-    // media-element playback as real media (plays through it, like YouTube).
-    // Route everything through an invisible <audio> sink on iOS.
-    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
-      (navigator.userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
-    if (isIOS && !window.OakNative) {   // app plays music natively instead
-      audioSink = ac.createMediaStreamDestination();
-      audioSinkEl = document.createElement("audio");
-      audioSinkEl.setAttribute("playsinline", "");
-      audioSinkEl.srcObject = audioSink.stream;
-    }
+    // NOTE: a MediaStream sink was tried here to beat the iOS silent switch
+    // on the web — WebKit's stream playback stutters badly (rapid pitch-
+    // looping), so the web keeps direct, glitch-free WebAudio and follows
+    // the ringer switch like any browser game. The iOS app plays natively.
   }
   if (ac.state === "suspended") ac.resume();
   sinkPlay();
@@ -528,6 +521,10 @@ async function loadBoard(el, song, diff, highlightId) {
 // in the native app, speak touch — no keyboard exists
 if (window.OakNative) {
   $("hint").innerHTML = "Tap the four lanes to hit the gems.<br>Hold your finger down for long notes.";
+} else if (/iP(hone|ad|od)/.test(navigator.userAgent) ||
+           (navigator.userAgent.includes("Mac") && navigator.maxTouchPoints > 1)) {
+  $("hint").innerHTML = "Tap the four lanes to hit the gems.<br>" +
+    "No sound? Flip your ringer switch off silent.";
 }
 
 $("lbInitials").value = localStorage.getItem("oakInitials") || "";
