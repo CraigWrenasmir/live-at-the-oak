@@ -259,11 +259,27 @@ const screens = { title:$("scrTitle"), cal:$("scrCal"), results:$("scrResults"),
 function show(name) { for (const k in screens) screens[k].classList.toggle("hidden", k !== name); }
 function hideAll() { for (const k in screens) screens[k].classList.add("hidden"); }
 
+let audioSink = null, audioSinkEl = null;
 function audioCtx() {
-  if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+  if (!ac) {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    // iOS treats raw WebAudio as "ambient" (muted by the silent switch) but
+    // media-element playback as real media (plays through it, like YouTube).
+    // Route everything through an invisible <audio> sink on iOS.
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      audioSink = ac.createMediaStreamDestination();
+      audioSinkEl = document.createElement("audio");
+      audioSinkEl.setAttribute("playsinline", "");
+      audioSinkEl.srcObject = audioSink.stream;
+    }
+  }
   if (ac.state === "suspended") ac.resume();
+  if (audioSinkEl) audioSinkEl.play().catch(() => {});
   return ac;
 }
+function oakDest() { return audioSink || ac.destination; }
 
 async function loadSong(song, diff, onProgress) {
   const ctx = audioCtx();
@@ -381,7 +397,7 @@ function startPlay() {
   judgements = [];
   source = ctx.createBufferSource();
   source.buffer = songBuffer;
-  source.connect(ctx.destination);
+  source.connect(oakDest());
   const t0 = ctx.currentTime + 0.1;
   source.start(t0 + LEAD_IN + AUDIO_OFFSET, DEMO ? DEMO_AT : 0);
   startAt = t0 + LEAD_IN - (DEMO ? DEMO_AT : 0);
@@ -394,7 +410,7 @@ function startPlay() {
       o.frequency.value = 1500;
       gn.gain.setValueAtTime(0.22, startAt + bt);
       gn.gain.exponentialRampToValueAtTime(0.001, startAt + bt + 0.04);
-      o.connect(gn); gn.connect(ctx.destination);
+      o.connect(gn); gn.connect(oakDest());
       o.start(startAt + bt); o.stop(startAt + bt + 0.05);
     }
   }
@@ -915,7 +931,7 @@ function startCal() {
     osc.frequency.value = i % 4 === 0 ? 1200 : 800;
     gain.gain.setValueAtTime(0.4, t);
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
-    osc.connect(gain); gain.connect(ctx.destination);
+    osc.connect(gain); gain.connect(oakDest());
     osc.start(t); osc.stop(t + 0.08);
     calClicks.push(t);
   }
@@ -982,7 +998,7 @@ function uiClick(primary) {
       o.type = "square"; o.frequency.value = f;
       gn.gain.setValueAtTime(0.10, at);
       gn.gain.exponentialRampToValueAtTime(0.001, at + 0.05);
-      o.connect(gn); gn.connect(ctx.destination);
+      o.connect(gn); gn.connect(oakDest());
       o.start(at); o.stop(at + 0.06);
     };
     beep(primary ? 784 : 587, t);
