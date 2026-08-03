@@ -268,7 +268,7 @@ function audioCtx() {
     // Route everything through an invisible <audio> sink on iOS.
     const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
       (navigator.userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
-    if (isIOS) {
+    if (isIOS && !window.OakNative) {   // app plays music natively instead
       audioSink = ac.createMediaStreamDestination();
       audioSinkEl = document.createElement("audio");
       audioSinkEl.setAttribute("playsinline", "");
@@ -291,6 +291,11 @@ function oakDest() { return audioSink || ac.destination; }
 async function loadSong(song, diff, onProgress) {
   const ctx = audioCtx();
   chart = await (await fetch(song.charts[diff])).json();
+  if (window.OakNative && window.OakNative.song) {
+    window.OakNative.song({ cmd: "load", slug: song.slug });
+    songBuffer = null;               // music lives on the native side
+    return;
+  }
   const resp = await fetch(chart.audio);
   const total = +resp.headers.get("Content-Length") || 0;
   let raw;
@@ -402,11 +407,17 @@ function startPlay() {
   score = 0; combo = 0; maxCombo = 0;
   counts = { perfect:0, great:0, ok:0, miss:0 };
   judgements = [];
-  source = ctx.createBufferSource();
-  source.buffer = songBuffer;
-  source.connect(oakDest());
   const t0 = ctx.currentTime + 0.1;
-  source.start(t0 + LEAD_IN + AUDIO_OFFSET, DEMO ? DEMO_AT : 0);
+  if (window.OakNative && window.OakNative.song) {
+    window.OakNative.song({ cmd: "stop" });
+    window.OakNative.song({ cmd: "play", delay: 0.1 + LEAD_IN + AUDIO_OFFSET, offset: 0 });
+    source = null;
+  } else {
+    source = ctx.createBufferSource();
+    source.buffer = songBuffer;
+    source.connect(oakDest());
+    source.start(t0 + LEAD_IN + AUDIO_OFFSET, DEMO ? DEMO_AT : 0);
+  }
   startAt = t0 + LEAD_IN - (DEMO ? DEMO_AT : 0);
   // ?sync — timing diagnostic: click on every chart beat, scheduled on the
   // same audio clock as the tiles. Clicks on the song's beat = charts true.
@@ -437,6 +448,7 @@ function startPlay() {
 function pauseGame() {
   if (!playing || paused) return;
   paused = true;
+  if (window.OakNative && window.OakNative.song) window.OakNative.song({ cmd: "pause" });
   if (audioSinkEl) audioSinkEl.pause();    // starve-proof: sink sleeps too,
   ac.suspend();                      // freezes the audio clock: notes, music,
   $("btnPause").classList.add("hidden");   // sway all halt in sync
@@ -447,6 +459,7 @@ function resumeGame() {
   if (!paused) return;
   paused = false;
   ac.resume();
+  if (window.OakNative && window.OakNative.song) window.OakNative.song({ cmd: "resume" });
   sinkPlay();
   hideAll();
   $("btnPause").classList.remove("hidden");
@@ -458,6 +471,7 @@ function endPlay(showResults = true) {
   $("btnPause").classList.add("hidden");
   if (ac && ac.state === "suspended") ac.resume();
   sinkPlay();
+  if (window.OakNative && window.OakNative.song) window.OakNative.song({ cmd: "stop" });
   try { source && source.stop(); } catch(e) {}
   if (!showResults) { show("title"); return; }
   const total = counts.perfect + counts.great + counts.ok + counts.miss;
