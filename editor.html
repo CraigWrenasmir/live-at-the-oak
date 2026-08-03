@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Oak Chart Editor</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:#0a0708; color:#e8ddc9; overflow:hidden;
+    font-family:"Courier New", ui-monospace, monospace; }
+  #bar { display:flex; gap:8px; align-items:center; padding:8px 10px;
+    background:#140c0e; border-bottom:2px solid #4a2c2f; flex-wrap:wrap; }
+  select, button { font-family:inherit; font-size:12px; background:#2a181b;
+    color:#e8ddc9; border:2px solid #6a4046; padding:5px 9px; cursor:pointer; }
+  button.on { border-color:#e8c53a; color:#e8c53a; }
+  button.primary { border-color:#7ee787; color:#7ee787; }
+  #status { margin-left:auto; font-size:12px; color:#8a7a63; }
+  #status.dirty { color:#e8c53a; }
+  #status.saved { color:#7ee787; }
+  #wrap { position:relative; height:calc(100% - 88px); }
+  canvas { display:block; width:100%; height:100%; cursor:crosshair; }
+  #help { padding:5px 10px; font-size:11px; color:#8a7a63; background:#140c0e;
+    border-top:1px solid #2a181b; white-space:nowrap; overflow-x:auto; }
+  kbd { border:1px solid #6a4046; padding:0 4px; background:#1a0f11; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <select id="selSong"></select>
+  <select id="selDiff"><option value="standard">standard</option><option value="hard">hard</option></select>
+  <button id="btnLoad" class="primary">Load</button>
+  <button id="btnPlayPause">&#9654; Play</button>
+  <button id="btnSnap" class="on">Snap 1/16</button>
+  <button id="btnMetro">Metronome</button>
+  <button id="btnZoomOut">&minus;</button>
+  <button id="btnZoomIn">+</button>
+  <button id="btnSave" class="primary">Save</button>
+  <span id="status">no chart loaded</span>
+</div>
+<div id="wrap"><canvas id="cv"></canvas></div>
+<div id="help">
+  <kbd>space</kbd> play/pause &nbsp; <kbd>click ruler</kbd> seek &nbsp;
+  <kbd>drag note</kbd> move (lanes too) &nbsp; <kbd>drag empty</kbd> select many &nbsp;
+  <kbd>dbl-click</kbd> add note (<kbd>shift</kbd> = hold) &nbsp;
+  <kbd>&#9003;</kbd> delete &nbsp; <kbd>&larr;/&rarr;</kbd> nudge (<kbd>shift</kbd> = 5ms fine) &nbsp;
+  <kbd>drag hold tail</kbd> length &nbsp; <kbd>&#8984;Z</kbd> undo &nbsp; <kbd>&#8984;S</kbd> save
+</div>
+<script>
+"use strict";
+const LANE_COLORS = ["#3ec54b", "#e04a3a", "#e8c53a", "#3a7de0"];
+const LANES = 4;
+const cv = document.getElementById("cv");
+const g = cv.getContext("2d");
+const $ = id => document.getElementById(id);
+
+let ac = null, buffer = null, chart = null, chartFile = null;
+let peaks = null;                 // waveform min/max per column at current zoom
+let pxPerSec = 120, scrollT = 0;  // seconds at left edge
+let cursor = 0;                   // seek position (seconds)
+let playing = false, playSrc = null, playT0 = 0, playFrom = 0;
+let snap = true, metro = false;
+let selected = new Set();
+let history = [], future = [];
+let dirty = false;
+let metroSched = 0;
+
+function setStatus(txt, cls) {
+  const s = $("status");
+  s.textContent = txt;
+  s.className = cls || "";
+}
+
+/* ---------------- loading ---------------- */
+async function loadSetlist() {
+  const songs = await (await fetch("charts/setlist.json")).json();
+  $("selSong").innerHTML = songs.map(s =>
+    `<option value="${s.slug}">${String(s.n).padStart(2,"0")} ${s.title}</option>`).join("");
+}
+loadSetlist();
+
+async function load() {
+  const slug = $("selSong").value, diff = $("selDiff").value;
+  chartFile = "charts/" + slug + (diff === "hard" ? "-hard" : "") + ".json";
+  setStatus("loading…");
+  chart = await (await fetch(chartFile + "?t=" + Math.random())).json();
+  chart.notes.sort((a, b) => a.t - b.t);
+  if (!ac) ac = new AudioContext();
+  const raw = await (await fetch(chart.audio)).arrayBuffer();
+  buffer = await ac.decodeAudioData(raw);
+  peaks = null; history = []; future = []; selected.clear();
+  cursor = 0; scrollT = 0; dirty = false;
+  setStatus(chartFile + " — " + chart.notes.length + " notes");
+  draw();
+}
+$("btnLoad").onclick = load;
+
+/* ---------------- waveform peaks ---------------- */
+function buildPeaks() {
+  const cols = Math.ceil(buffer.duration * pxPerSec);
+  const d = buffer.getChannelData(0);
+  const per = Math.floor(d.length / cols) || 1;
+  peaks = new Float32Array(cols * 2);
+  for (let c = 0; c < cols; c++) {
+    let mn = 1, mx = -1;
+    const base = c * per, end = Math.min(base + per, d.length);
+    for (let i = base; i < end; i += 4) {
+      const v = d[i];
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+    }
+    peaks[c*2] = mn; peaks[c*2+1] = mx;
+  }
+}
+
+/* ---------------- geometry ---------------- */
+const RULER_H = 26;
+function laneTop(l) { return RULER_H + l * laneH(); }
+function laneH() { return Math.floor((cv.height / devicePixelRatio - RULER_H - 110) / LANES); }
+function waveTop() { return RULER_H + LANES * laneH() + 8; }
+function tToX(t) { return (t - scrollT) * pxPerSec; }
+function xToT(x) { return scrollT + x / pxPerSec; }
+function beatLen() { return 60 / chart.bpm; }
+function snapT(t) {
+  if (!snap) return t;
+  const s = beatLen() / 4, o = chart.beatOffset || 0;
+  return Math.max(0, o + Math.round((t - o) / s) * s);
+}
+function playTime() { return playing ? playFrom + (ac.currentTime - playT0) : cursor; }
+
+/* ---------------- drawing ---------------- */
+function draw() {
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * devicePixelRatio) {
+    cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
+  }
+  g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  g.fillStyle = "#0a0708"; g.fillRect(0, 0, W, H);
+  if (!chart || !buffer) { requestAnimationFrame(draw); return; }
+  if (!peaks) buildPeaks();
+
+  const lh = laneH(), wTop = waveTop(), wH = H - wTop - 4;
+
+  // beat grid
+  const bl = beatLen(), o = chart.beatOffset || 0;
+  const first = Math.max(0, Math.floor((scrollT - o) / (bl/4)));
+  for (let k = first; ; k++) {
+    const t = o + k * bl / 4, x = tToX(t);
+    if (x > W) break;
+    if (x < 0) continue;
+    const isBeat = k % 4 === 0, isBar = k % 16 === 0;
+    g.strokeStyle = isBar ? "rgba(232,221,201,.28)" :
+                    isBeat ? "rgba(232,221,201,.14)" : "rgba(232,221,201,.05)";
+    g.beginPath(); g.moveTo(x, RULER_H); g.lineTo(x, H); g.stroke();
+  }
+
+  // ruler
+  g.fillStyle = "#140c0e"; g.fillRect(0, 0, W, RULER_H);
+  g.fillStyle = "#8a7a63"; g.font = "10px monospace"; g.textAlign = "left";
+  const step = pxPerSec > 200 ? 1 : pxPerSec > 60 ? 5 : 15;
+  for (let s = Math.ceil(scrollT / step) * step; tToX(s) < W; s += step) {
+    const x = tToX(s);
+    g.fillText(`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`, x + 3, 17);
+    g.fillRect(x, RULER_H - 6, 1, 6);
+  }
+
+  // lane backgrounds + labels
+  for (let l = 0; l < LANES; l++) {
+    g.fillStyle = l % 2 ? "rgba(255,255,255,0.020)" : "rgba(255,255,255,0.038)";
+    g.fillRect(0, laneTop(l), W, lh);
+  }
+
+  // waveform
+  g.fillStyle = "rgba(126,231,135,0.45)";
+  const c0 = Math.max(0, Math.floor(scrollT * pxPerSec));
+  for (let x = 0; x < W; x++) {
+    const c = c0 + x;
+    if (c * 2 + 1 >= peaks.length) break;
+    const mn = peaks[c*2], mx = peaks[c*2+1];
+    const mid = wTop + wH / 2;
+    g.fillRect(x, mid + mn * (wH/2), 1, Math.max(1, (mx - mn) * (wH/2)));
+  }
+
+  // notes
+  for (const n of chart.notes) {
+    const x = tToX(n.t);
+    const xe = n.len ? tToX(n.t + n.len) : x;
+    if (xe < -20 || x > W + 20) continue;
+    const y = laneTop(n.lane), sel = selected.has(n);
+    if (n.len) {
+      g.fillStyle = LANE_COLORS[n.lane] + "55";
+      g.fillRect(x, y + lh*0.3, xe - x, lh*0.4);
+      g.fillStyle = sel ? "#fff" : LANE_COLORS[n.lane];
+      g.fillRect(xe - 3, y + lh*0.22, 5, lh*0.56);   // tail handle
+    }
+    g.fillStyle = LANE_COLORS[n.lane];
+    g.strokeStyle = sel ? "#fff" : "rgba(0,0,0,.6)";
+    g.lineWidth = sel ? 2.5 : 1.5;
+    g.beginPath();
+    g.ellipse(x, y + lh/2, 7, Math.min(13, lh*0.38), 0, 0, Math.PI*2);
+    g.fill(); g.stroke();
+  }
+
+  // marquee
+  if (drag && drag.kind === "marquee") {
+    g.strokeStyle = "#e8c53a"; g.lineWidth = 1;
+    g.setLineDash([4,3]);
+    g.strokeRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0);
+    g.setLineDash([]);
+  }
+
+  // playhead
+  const pt = playTime();
+  const px = tToX(pt);
+  g.strokeStyle = "#7ee787"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(px, RULER_H); g.lineTo(px, H); g.stroke();
+
+  // auto-scroll while playing
+  if (playing) {
+    if (px > W * 0.85) scrollT = pt - (W * 0.85) / pxPerSec;
+    if (pt > buffer.duration) stopPlay();
+    scheduleMetro();
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+/* ---------------- playback ---------------- */
+function startPlay(from) {
+  stopPlay();
+  playFrom = Math.max(0, from);
+  playSrc = ac.createBufferSource();
+  playSrc.buffer = buffer;
+  playSrc.connect(ac.destination);
+  playT0 = ac.currentTime + 0.05;
+  playSrc.start(playT0, playFrom);
+  playing = true;
+  metroSched = playFrom;
+  $("btnPlayPause").innerHTML = "&#10074;&#10074; Pause";
+  if (ac.state === "suspended") ac.resume();
+}
+function stopPlay() {
+  if (playSrc) { try { playSrc.stop(); } catch(e) {} playSrc = null; }
+  if (playing) cursor = Math.min(playTime(), buffer.duration);
+  playing = false;
+  $("btnPlayPause").innerHTML = "&#9654; Play";
+}
+function scheduleMetro() {
+  if (!metro) return;
+  const ahead = playTime() + 0.4;
+  const bl = beatLen(), o = chart.beatOffset || 0;
+  let k = Math.ceil((metroSched - o) / bl);
+  for (; o + k * bl < ahead; k++) {
+    const t = o + k * bl;
+    if (t < metroSched) continue;
+    const at = playT0 + (t - playFrom);
+    if (at < ac.currentTime) continue;
+    const osc = ac.createOscillator(), gn = ac.createGain();
+    osc.frequency.value = (k % 4 === 0) ? 1500 : 1000;
+    gn.gain.setValueAtTime(0.25, at);
+    gn.gain.exponentialRampToValueAtTime(0.001, at + 0.03);
+    osc.connect(gn); gn.connect(ac.destination);
+    osc.start(at); osc.stop(at + 0.04);
+  }
+  metroSched = ahead;
+}
+$("btnPlayPause").onclick = () => { if (!buffer) return; playing ? stopPlay() : startPlay(cursor); };
+
+/* ---------------- editing ---------------- */
+function pushHistory() {
+  history.push(JSON.stringify(chart.notes));
+  if (history.length > 100) history.shift();
+  future = [];
+  dirty = true;
+  setStatus("edited — unsaved", "dirty");
+}
+function undo() {
+  if (!history.length) return;
+  future.push(JSON.stringify(chart.notes));
+  chart.notes = JSON.parse(history.pop());
+  selected.clear(); dirty = true;
+  setStatus("undo — unsaved", "dirty");
+}
+function redo() {
+  if (!future.length) return;
+  history.push(JSON.stringify(chart.notes));
+  chart.notes = JSON.parse(future.pop());
+  selected.clear(); dirty = true;
+  setStatus("redo — unsaved", "dirty");
+}
+
+function noteAt(x, y) {
+  if (!chart) return null;
+  for (let i = chart.notes.length - 1; i >= 0; i--) {
+    const n = chart.notes[i];
+    const nx = tToX(n.t), ny = laneTop(n.lane) + laneH()/2;
+    if (Math.abs(x - nx) < 10 && Math.abs(y - ny) < laneH()/2) return n;
+    if (n.len) {
+      const xe = tToX(n.t + n.len);
+      if (Math.abs(x - xe) < 6 && Math.abs(y - ny) < laneH()/2) return { tail: n };
+    }
+  }
+  return null;
+}
+
+let drag = null;
+cv.addEventListener("pointerdown", e => {
+  if (!chart) return;
+  const r = cv.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (y < RULER_H) {                         // seek
+    cursor = Math.max(0, xToT(x));
+    if (playing) startPlay(cursor);
+    return;
+  }
+  const hit = noteAt(x, y);
+  if (hit && hit.tail) {
+    pushHistory();
+    drag = { kind: "tail", n: hit.tail };
+  } else if (hit) {
+    if (!selected.has(hit)) {
+      if (!e.shiftKey) selected.clear();
+      selected.add(hit);
+    }
+    pushHistory();
+    drag = { kind: "move", x0: x, y0: y, t0s: [...selected].map(n => n.t),
+             lanes0: [...selected].map(n => n.lane), notes: [...selected] };
+  } else {
+    if (!e.shiftKey) selected.clear();
+    drag = { kind: "marquee", x0: x, y0: y, x1: x, y1: y };
+  }
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const r = cv.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (drag.kind === "marquee") {
+    drag.x1 = x; drag.y1 = y;
+  } else if (drag.kind === "tail") {
+    const nt = snapT(xToT(x));
+    drag.n.len = Math.max(beatLen()/4, +(nt - drag.n.t).toFixed(3));
+  } else if (drag.kind === "move") {
+    const dt = xToT(x) - xToT(drag.x0);
+    const dLane = Math.round((y - drag.y0) / laneH());
+    drag.notes.forEach((n, i) => {
+      n.t = +(snapT(drag.t0s[i] + dt)).toFixed(3);
+      n.lane = Math.max(0, Math.min(3, drag.lanes0[i] + dLane));
+    });
+  }
+});
+cv.addEventListener("pointerup", e => {
+  if (drag && drag.kind === "marquee") {
+    const [a, b] = [Math.min(drag.x0, drag.x1), Math.max(drag.x0, drag.x1)];
+    const [c, d] = [Math.min(drag.y0, drag.y1), Math.max(drag.y0, drag.y1)];
+    for (const n of chart.notes) {
+      const nx = tToX(n.t), ny = laneTop(n.lane) + laneH()/2;
+      if (nx >= a && nx <= b && ny >= c && ny <= d) selected.add(n);
+    }
+    if (Math.abs(drag.x1 - drag.x0) < 4) {   // simple click on empty space
+      selected.clear();
+      history.pop && null;                    // no-op; marquee didn't pushHistory
+    }
+  } else if (drag && drag.kind === "move") {
+    chart.notes.sort((x1, x2) => x1.t - x2.t);
+  }
+  drag = null;
+});
+cv.addEventListener("dblclick", e => {
+  if (!chart) return;
+  const r = cv.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (y < RULER_H || y > waveTop()) return;
+  const lane = Math.max(0, Math.min(3, Math.floor((y - RULER_H) / laneH())));
+  pushHistory();
+  const note = { t: +snapT(xToT(x)).toFixed(3), lane };
+  if (e.shiftKey) note.len = +beatLen().toFixed(3);
+  chart.notes.push(note);
+  chart.notes.sort((a, b) => a.t - b.t);
+  selected.clear(); selected.add(note);
+});
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  if (e.metaKey || e.ctrlKey) {
+    const t = xToT(e.clientX - cv.getBoundingClientRect().left);
+    pxPerSec = Math.max(20, Math.min(500, pxPerSec * (e.deltaY < 0 ? 1.15 : 0.87)));
+    scrollT = Math.max(0, t - (e.clientX - cv.getBoundingClientRect().left) / pxPerSec);
+    peaks = null;
+  } else {
+    scrollT = Math.max(0, scrollT + (e.deltaY + e.deltaX) / pxPerSec * 1.5);
+  }
+}, { passive: false });
+
+document.addEventListener("keydown", e => {
+  if (!chart) return;
+  const mod = e.metaKey || e.ctrlKey;
+  if (e.code === "Space") { e.preventDefault(); playing ? stopPlay() : startPlay(cursor); }
+  else if (mod && e.code === "KeyZ" && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (mod && e.code === "KeyZ" && e.shiftKey) { e.preventDefault(); redo(); }
+  else if (mod && e.code === "KeyS") { e.preventDefault(); save(); }
+  else if ((e.code === "Backspace" || e.code === "Delete") && selected.size) {
+    e.preventDefault(); pushHistory();
+    chart.notes = chart.notes.filter(n => !selected.has(n));
+    selected.clear();
+  }
+  else if ((e.code === "ArrowLeft" || e.code === "ArrowRight") && selected.size) {
+    e.preventDefault(); pushHistory();
+    const d = (e.code === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 0.005 : beatLen()/4);
+    for (const n of selected) n.t = +(Math.max(0, n.t + d)).toFixed(3);
+    chart.notes.sort((a, b) => a.t - b.t);
+  }
+});
+
+/* ---------------- toolbar ---------------- */
+$("btnSnap").onclick = () => { snap = !snap; $("btnSnap").classList.toggle("on", snap); };
+$("btnMetro").onclick = () => { metro = !metro; $("btnMetro").classList.toggle("on", metro); };
+$("btnZoomIn").onclick = () => { pxPerSec = Math.min(500, pxPerSec * 1.3); peaks = null; };
+$("btnZoomOut").onclick = () => { pxPerSec = Math.max(20, pxPerSec / 1.3); peaks = null; };
+
+async function save() {
+  if (!chart || !chartFile) return;
+  chart.notes.sort((a, b) => a.t - b.t);
+  setStatus("saving…");
+  const r = await fetch(chartFile, { method: "PUT", body: JSON.stringify(chart, null, 1) });
+  if (r.ok) { dirty = false; setStatus("saved " + chartFile, "saved"); }
+  else setStatus("SAVE FAILED " + r.status, "dirty");
+}
+$("btnSave").onclick = save;
+window.addEventListener("beforeunload", e => { if (dirty) e.preventDefault(); });
+</script>
+</body>
+</html>
