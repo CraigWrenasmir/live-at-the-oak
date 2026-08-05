@@ -3,7 +3,7 @@
   "n": 1,
   "slug": "rdst-gm",
   "title": "Rdst Gm",
-  "bpm": 160.0,
+  "bpm": 159.999,
   "duration": 303.4,
   "audio": "audio/rdst-gm.mp3",
   "charts": {
@@ -15,7 +15,7 @@
   "n": 2,
   "slug": "lucempight",
   "title": "Lucempight",
-  "bpm": 160.0,
+  "bpm": 159.999,
   "duration": 276.01,
   "audio": "audio/lucempight.mp3",
   "charts": {
@@ -39,7 +39,7 @@
   "n": 4,
   "slug": "what-is-better",
   "title": "What Is Better",
-  "bpm": 95.0,
+  "bpm": 94.996,
   "duration": 320.53,
   "audio": "audio/what-is-better.mp3",
   "charts": {
@@ -63,7 +63,7 @@
   "n": 6,
   "slug": "crafluropi",
   "title": "Crafluropi",
-  "bpm": 120.0,
+  "bpm": 119.992,
   "duration": 266.25,
   "audio": "audio/crafluropi.mp3",
   "charts": {
@@ -75,7 +75,7 @@
   "n": 7,
   "slug": "mabon",
   "title": "Mabon",
-  "bpm": 130.0,
+  "bpm": 129.999,
   "duration": 301.99,
   "audio": "audio/mabon.mp3",
   "charts": {
