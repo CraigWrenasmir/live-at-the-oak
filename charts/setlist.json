@@ -3,7 +3,7 @@
   "n": 1,
   "slug": "rdst-gm",
   "title": "Rdst Gm",
-  "bpm": 161.5,
+  "bpm": 160.0,
   "duration": 303.4,
   "audio": "audio/rdst-gm.mp3",
   "charts": {
@@ -15,7 +15,7 @@
   "n": 2,
   "slug": "lucempight",
   "title": "Lucempight",
-  "bpm": 161.5,
+  "bpm": 160.0,
   "duration": 276.01,
   "audio": "audio/lucempight.mp3",
   "charts": {
@@ -27,7 +27,7 @@
   "n": 3,
   "slug": "spinet-destroiet",
   "title": "Spinet Destroiet",
-  "bpm": 139.67,
+  "bpm": 140.0,
   "duration": 247.23,
   "audio": "audio/spinet-destroiet.mp3",
   "charts": {
@@ -39,7 +39,7 @@
   "n": 4,
   "slug": "what-is-better",
   "title": "What Is Better",
-  "bpm": 95.7,
+  "bpm": 95.0,
   "duration": 320.53,
   "audio": "audio/what-is-better.mp3",
   "charts": {
@@ -51,7 +51,7 @@
   "n": 5,
   "slug": "the-way-that-i-go",
   "title": "The Way That I Go",
-  "bpm": 60.09,
+  "bpm": 60.0,
   "duration": 369.0,
   "audio": "audio/the-way-that-i-go.mp3",
   "charts": {
@@ -63,7 +63,7 @@
   "n": 6,
   "slug": "crafluropi",
   "title": "Crafluropi",
-  "bpm": 120.19,
+  "bpm": 120.0,
   "duration": 266.25,
   "audio": "audio/crafluropi.mp3",
   "charts": {
@@ -75,7 +75,7 @@
   "n": 7,
   "slug": "mabon",
   "title": "Mabon",
-  "bpm": 86.13,
+  "bpm": 130.0,
   "duration": 301.99,
   "audio": "audio/mabon.mp3",
   "charts": {
