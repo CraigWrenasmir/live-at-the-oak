@@ -239,6 +239,7 @@ setTimeout(applyLayout, 1200);
 
 let ac = null;              // AudioContext, created on first gesture
 let usingDraft = false;
+let liveBeatIdx = 0;        // cursor into chart.beats (v3 live beat map)
 let songBuffer = null, chart = null, source = null;
 let startAt = 0;
 let playing = false, paused = false, difficulty = "standard";
@@ -426,6 +427,17 @@ function startPlay() {
   // same audio clock as the tiles. Clicks on the song's beat = charts true.
   if (location.search.includes("sync")) {
     const bl = 60 / chart.bpm;
+    if (chart.beats && chart.beats.length > 1) {
+      for (const bt of chart.beats) {
+        const o = ctx.createOscillator(), gn = ctx.createGain();
+        o.frequency.value = 1500;
+        gn.gain.setValueAtTime(0.22, startAt + bt);
+        gn.gain.exponentialRampToValueAtTime(0.001, startAt + bt + 0.04);
+        o.connect(gn); gn.connect(oakDest());
+        o.start(startAt + bt); o.stop(startAt + bt + 0.05);
+      }
+      return;
+    }
     for (let bt = chart.beatOffset || 0; bt < chart.duration; bt += bl) {
       const o = ctx.createOscillator(), gn = ctx.createGain();
       o.frequency.value = 1500;
@@ -437,6 +449,7 @@ function startPlay() {
   }
   nowPlaying = SONGS[songIdx].title.toUpperCase();
   nowPlayingDiff = difficulty.toUpperCase();
+  liveBeatIdx = 0;
   playing = true; paused = false;
   hideAll();
   $("btnPause").classList.remove("hidden");
@@ -689,10 +702,23 @@ function frame() {
   sweepMisses(now);
   processHolds(now);
 
-  // beat clock for the ambient layer
-  const beatLen = 60 / chart.bpm;
-  const beatIdx = Math.floor(now / beatLen);
-  const beatPhase = now / beatLen - beatIdx;              // 0..1 within beat
+  // beat clock — follows the live performance's beat map when the chart
+  // carries one (v3 charts), else the fixed bpm grid
+  let beatLen, beatIdx, beatPhase;
+  const LB = chart.beats;
+  if (LB && LB.length > 1) {
+    while (liveBeatIdx < LB.length - 1 && LB[liveBeatIdx + 1] <= now) liveBeatIdx++;
+    while (liveBeatIdx > 0 && LB[liveBeatIdx] > now) liveBeatIdx--;
+    beatIdx = liveBeatIdx;
+    const cur = LB[beatIdx], nxt = LB[Math.min(beatIdx + 1, LB.length - 1)];
+    beatLen = Math.max(0.2, nxt - cur || 60 / chart.bpm);
+    beatPhase = Math.min(1, Math.max(0, (now - cur) / beatLen));
+  } else {
+    beatLen = 60 / chart.bpm;
+    beatIdx = Math.floor(now / beatLen);
+    beatPhase = now / beatLen - beatIdx;                  // 0..1 within beat
+  }
+  window.OakGame.liveBeat = { idx: beatIdx, phase: beatPhase };
   const beatPulse = Math.pow(Math.max(0, 1 - beatPhase * 2.5), 2);
   if (beatIdx !== fx.lastBeat && now > 0) {
     fx.lastBeat = beatIdx;
@@ -757,11 +783,16 @@ function frame() {
   g.lineTo(edgeX(1,1), vy(1)); g.lineTo(edgeX(0,1), vy(1));
   g.closePath(); g.fill();
 
-  const firstBeat = Math.ceil((now - 0.05) / beatLen) * beatLen;
   g.strokeStyle = "rgba(232,221,201,0.10)"; g.lineWidth = 1;
-  for (let bt = firstBeat; bt < now + LOOKAHEAD; bt += beatLen) {
-    const v = (bt - now) / LOOKAHEAD; if (v < 0 || v > 1) continue;
+  const drawBeatLine = bt => {
+    const v = (bt - now) / LOOKAHEAD; if (v < 0 || v > 1) return;
     g.beginPath(); g.moveTo(edgeX(0,v), vy(v)); g.lineTo(edgeX(1,v), vy(v)); g.stroke();
+  };
+  if (LB && LB.length > 1) {
+    for (let k = beatIdx; k < LB.length && LB[k] < now + LOOKAHEAD; k++) drawBeatLine(LB[k]);
+  } else {
+    const firstBeat = Math.ceil((now - 0.05) / beatLen) * beatLen;
+    for (let bt = firstBeat; bt < now + LOOKAHEAD; bt += beatLen) drawBeatLine(bt);
   }
   g.strokeStyle = "rgba(232,221,201,0.16)";
   for (let i = 0; i <= 4; i++) {
@@ -1180,8 +1211,9 @@ function tick() {
   const gm = window.OakGame;
   let phase;
   if (gm && gm.playing && !gm.paused) {
-    const beatLen = 60 / gm.bpm;
-    phase = Math.max(0, gm.time()) / beatLen;       // beats elapsed
+    // live beat map when present (v3), fixed bpm otherwise
+    phase = gm.liveBeat ? gm.liveBeat.idx + gm.liveBeat.phase
+                        : Math.max(0, gm.time()) / (60 / gm.bpm);
     // drain hit events -> flash the stage in lane color
     while (gm.hits.length) {
       const h = gm.hits.shift();

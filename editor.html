@@ -93,6 +93,7 @@ async function load() {
   buffer = await ac.decodeAudioData(raw);
   peaks = null; history = []; future = []; selected.clear();
   cursor = 0; scrollT = 0; dirty = false;
+  buildSlots();
   setStatus((isDraft ? "[DRAFT] " : "") + chartFile.replace("charts/", "") +
             " — " + chart.notes.length + " notes", isDraft ? "dirty" : "");
   draw();
@@ -125,8 +126,23 @@ function waveTop() { return RULER_H + LANES * laneH() + 8; }
 function tToX(t) { return (t - scrollT) * pxPerSec; }
 function xToT(x) { return scrollT + x / pxPerSec; }
 function beatLen() { return 60 / chart.bpm; }
+let slots = null;             // dynamic 16th grid from chart.beats (v3)
+function buildSlots() {
+  slots = null;
+  if (!chart || !chart.beats || chart.beats.length < 2) return;
+  slots = [];
+  const B = chart.beats;
+  for (let i = 0; i < B.length - 1; i++)
+    for (let k = 0; k < 4; k++) slots.push(B[i] + (B[i+1] - B[i]) * k / 4);
+}
 function snapT(t) {
   if (!snap) return t;
+  if (slots) {
+    let lo = 0, hi = slots.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; slots[m] < t ? lo = m + 1 : hi = m; }
+    const a = slots[Math.max(0, lo - 1)], b = slots[lo];
+    return Math.abs(t - a) < Math.abs(t - b) ? a : b;
+  }
   const s = beatLen() / 4, o = chart.beatOffset || 0;
   return Math.max(0, o + Math.round((t - o) / s) * s);
 }
@@ -145,17 +161,29 @@ function draw() {
 
   const lh = laneH(), wTop = waveTop(), wH = H - wTop - 4;
 
-  // beat grid
-  const bl = beatLen(), o = chart.beatOffset || 0;
-  const first = Math.max(0, Math.floor((scrollT - o) / (bl/4)));
-  for (let k = first; ; k++) {
-    const t = o + k * bl / 4, x = tToX(t);
-    if (x > W) break;
-    if (x < 0) continue;
-    const isBeat = k % 4 === 0, isBar = k % 16 === 0;
-    g.strokeStyle = isBar ? "rgba(232,221,201,.28)" :
-                    isBeat ? "rgba(232,221,201,.14)" : "rgba(232,221,201,.05)";
-    g.beginPath(); g.moveTo(x, RULER_H); g.lineTo(x, H); g.stroke();
+  // beat grid — dynamic (live beat map) when the chart carries one
+  if (slots) {
+    for (let k = 0; k < slots.length; k++) {
+      const x = tToX(slots[k]);
+      if (x < 0) continue;
+      if (x > W) break;
+      const isBeat = k % 4 === 0, isBar = k % 16 === 0;
+      g.strokeStyle = isBar ? "rgba(232,221,201,.28)" :
+                      isBeat ? "rgba(232,221,201,.14)" : "rgba(232,221,201,.05)";
+      g.beginPath(); g.moveTo(x, RULER_H); g.lineTo(x, H); g.stroke();
+    }
+  } else {
+    const bl = beatLen(), o = chart.beatOffset || 0;
+    const first = Math.max(0, Math.floor((scrollT - o) / (bl/4)));
+    for (let k = first; ; k++) {
+      const t = o + k * bl / 4, x = tToX(t);
+      if (x > W) break;
+      if (x < 0) continue;
+      const isBeat = k % 4 === 0, isBar = k % 16 === 0;
+      g.strokeStyle = isBar ? "rgba(232,221,201,.28)" :
+                      isBeat ? "rgba(232,221,201,.14)" : "rgba(232,221,201,.05)";
+      g.beginPath(); g.moveTo(x, RULER_H); g.lineTo(x, H); g.stroke();
+    }
   }
 
   // ruler
@@ -249,13 +277,19 @@ function stopPlay() {
   playing = false;
   $("btnPlayPause").innerHTML = "&#9654; Play";
 }
+function metroBeats(from, to) {
+  if (chart.beats && chart.beats.length > 1) {
+    return chart.beats.map((t, k) => [t, k]).filter(([t]) => t >= from && t < to);
+  }
+  const bl = beatLen(), o = chart.beatOffset || 0;
+  const out = [];
+  for (let k = Math.ceil((from - o) / bl); o + k * bl < to; k++) out.push([o + k * bl, k]);
+  return out;
+}
 function scheduleMetro() {
   if (!metro) return;
   const ahead = playTime() + 0.4;
-  const bl = beatLen(), o = chart.beatOffset || 0;
-  let k = Math.ceil((metroSched - o) / bl);
-  for (; o + k * bl < ahead; k++) {
-    const t = o + k * bl;
+  for (const [t, k] of metroBeats(metroSched, ahead)) {
     if (t < metroSched) continue;
     const at = playT0 + (t - playFrom);
     if (at < ac.currentTime) continue;
