@@ -41,8 +41,16 @@ def grid_concentration(times, weights, slot):
 
 
 def fit_grid(times, weights, bpm0, fixed_bpm=None):
-    cands = [float(fixed_bpm)] if fixed_bpm else \
-        list(np.arange(bpm0 - 2.0, bpm0 + 2.0, 0.01)) + [round(bpm0), round(bpm0 * 2) / 2]
+    if fixed_bpm:
+        cands = [float(fixed_bpm)]
+    else:
+        # the tempo estimator often lands on a harmonic — search around the
+        # estimate AND its musical ratios, let concentration pick the winner
+        cands = []
+        for ratio in (1, 0.5, 2, 2/3, 3/4, 4/3, 3/2):
+            c = bpm0 * ratio
+            if 50 <= c <= 220:
+                cands += list(np.arange(c - 2.0, c + 2.0, 0.01))
     best = (-1, bpm0, 0.0)
     for bpm in cands:
         slot = 60.0 / bpm / 4
@@ -108,7 +116,9 @@ def melody_notes(y, sr, fmin, fmax, vp_gate=0.4):
 def main():
     slug = sys.argv[1]
     fixed_bpm = float(sys.argv[sys.argv.index("--bpm") + 1]) if "--bpm" in sys.argv else None
-    no_snap = "--no-snap" in sys.argv   # chopped/swung material: true hit times are truth
+    # True hit times are ALWAYS truth now (drift-proof by construction);
+    # --snap restores grid quantisation if ever wanted for comparison.
+    no_snap = "--snap" not in sys.argv
 
     root = Path(__file__).resolve().parent.parent
     stem_dir = root / "stems" / "htdemucs" / slug
@@ -331,6 +341,24 @@ def main():
     for diff, (t, h, ph, miss) in audits.items():
         print(f"  [{diff}] {t} taps + {h} holds | phantom {ph:.1f}% | "
               f"top-100 drum hits missed: {miss}")
+
+    # drift detector: median |tap - nearest drum hit| in the first vs last minute.
+    # If these diverge, the chart is walking away from the audio.
+    std = json.loads((out_dir / f"{slug}.json").read_text())
+    taps_all = np.array([n_["t"] for n_ in std["notes"] if "len" not in n_])
+    ref = np.sort(np.concatenate([
+        d_t,
+        onsets_of(bass, sr)[0] if np.any(np.abs(bass) > 1e-4) else np.array([]),
+        onsets_of(other, sr)[0] if np.any(np.abs(other) > 1e-4) else np.array([]),
+        onsets_of(vocals, sr)[0] if np.any(np.abs(vocals) > 1e-4) else np.array([]),
+    ]))
+    def med_dev(a, b):
+        w = taps_all[(taps_all >= a) & (taps_all <= b)]
+        if not len(w) or not len(ref):
+            return 0.0
+        return float(np.median([np.abs(ref - t).min() for t in w]) * 1000)
+    print(f"  drift check: first-min dev {med_dev(0, 60):.0f}ms | "
+          f"last-min dev {med_dev(duration - 60, duration):.0f}ms")
 
 
 if __name__ == "__main__":
