@@ -108,6 +108,7 @@ def melody_notes(y, sr, fmin, fmax, vp_gate=0.4):
 def main():
     slug = sys.argv[1]
     fixed_bpm = float(sys.argv[sys.argv.index("--bpm") + 1]) if "--bpm" in sys.argv else None
+    no_snap = "--no-snap" in sys.argv   # chopped/swung material: true hit times are truth
 
     root = Path(__file__).resolve().parent.parent
     stem_dir = root / "stems" / "htdemucs" / slug
@@ -135,16 +136,20 @@ def main():
 
     def to_slot(t): return int(round((t - offset) / slot))
     def slot_time(k): return offset + k * slot
+    def place(t):
+        """Tile timestamp: grid slot normally; the TRUE hit time in no-snap
+        mode (chopped/swung breaks keep their micro-timing)."""
+        return float(t) if no_snap else slot_time(to_slot(t))
 
-    # per-slot best hit per kind (merges flams)
+    # per-slot best hit per kind (merges flams); no-snap keeps true times
     hits = {}
     for t, s, kind in zip(d_t, d_s, kinds):
         key = (to_slot(t), kind)
-        if key not in hits or s > hits[key]:
-            hits[key] = s
-    kick = sorted((slot_time(k), s) for (k, kd), s in hits.items() if kd == "kick")
-    snare = sorted((slot_time(k), s) for (k, kd), s in hits.items() if kd == "snare")
-    hat = sorted((slot_time(k), s) for (k, kd), s in hits.items() if kd == "hat")
+        if key not in hits or s > hits[key][1]:
+            hits[key] = (place(t), s)
+    kick = sorted(v for (k, kd), v in hits.items() if kd == "kick")
+    snare = sorted(v for (k, kd), v in hits.items() if kd == "snare")
+    hat = sorted(v for (k, kd), v in hits.items() if kd == "hat")
 
     # section energy tiers from drum-stem rms (8-bar windows)
     bar = slot * SLOTS_PER_BAR
@@ -212,7 +217,7 @@ def main():
             if perc_density(t0) > mel_dens:
                 prev_lane = None
                 continue
-            ts = slot_time(to_slot(t0))
+            ts = place(t0)
             if prev_lane is None or t0 - prev_t > 0.8:
                 lane = int(np.searchsorted(qs, midi))
             else:
@@ -229,7 +234,7 @@ def main():
             for t0, dur, midi in bassline:
                 if perc_density(t0) > 4.5:
                     continue
-                ts = slot_time(to_slot(t0))
+                ts = place(t0)
                 mel_events.append((ts, {"t": round(float(ts), 3),
                                         "lane": 0 if midi < np.median([m for _,_,m in bassline] or [40]) else 1},
                                    1, 0.5))
