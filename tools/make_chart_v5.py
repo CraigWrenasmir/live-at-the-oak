@@ -50,7 +50,7 @@ def fit_grid(times, weights, bpm0, fixed_bpm=None):
         for ratio in (1, 0.5, 2, 2/3, 3/4, 4/3, 3/2):
             c = bpm0 * ratio
             if 50 <= c <= 220:
-                cands += list(np.arange(c - 2.0, c + 2.0, 0.01))
+                cands += list(np.arange(c * 0.93, c * 1.07, 0.01))   # ±7%: windows tile
     best = (-1, bpm0, 0.0)
     for bpm in cands:
         slot = 60.0 / bpm / 4
