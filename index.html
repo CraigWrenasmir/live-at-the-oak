@@ -1024,6 +1024,7 @@ function finishCal(ok) {
 
 /* ---------------- input ---------------- */
 document.addEventListener("keydown", e => {
+  if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;  // typing initials!
   if (e.repeat) return;
   const lane = LANE_KEYS.indexOf(e.code);
   if (calActive) { calTap(); return; }
@@ -1031,6 +1032,7 @@ document.addEventListener("keydown", e => {
   if (e.code === "KeyP" && playing) { paused ? resumeGame() : pauseGame(); }
 });
 document.addEventListener("keyup", e => {
+  if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
   const lane = LANE_KEYS.indexOf(e.code);
   if (lane >= 0) releaseLane(lane);
 });
